@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import keiyoushi.utils.addEditTextPreference
 import keiyoushi.utils.addListPreference
 import keiyoushi.utils.addSwitchPreference
@@ -32,6 +33,7 @@ import org.jsoup.nodes.Element
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -54,6 +56,12 @@ class AnimePahe :
         client.newBuilder().apply {
             interceptors().removeAll { it is DdosGuardInterceptor }
         }.build()
+    }
+
+    private val searchClient by lazy {
+        client.newBuilder()
+            .rateLimit(2, 1, TimeUnit.SECONDS)
+            .build()
     }
 
     override val name = "AnimePahe"
@@ -641,7 +649,7 @@ class AnimePahe :
         }.build()
 
         return try {
-            client.newCall(GET(searchUrl)).await().use { response ->
+            searchClient.newCall(GET(searchUrl)).await().use { response ->
                 if (!response.isSuccessful) return null
                 val searchData = response.parseAs<ResponseDto<SearchResultDto>>()
 
