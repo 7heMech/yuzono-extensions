@@ -144,7 +144,11 @@ jobs:
   publish:
     name: Publish extension repo
     needs: [prepare, build]
-    if: always() && github.repository == 'yuzono/anime-extensions'
+    if: >-
+      !cancelled()
+      && needs.prepare.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+      && github.repository == 'yuzono/anime-extensions'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
