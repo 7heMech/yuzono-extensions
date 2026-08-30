@@ -26,6 +26,8 @@ jobs:
     outputs:
       matrix: ${{ steps.generate-matrices.outputs.matrix }}
       delete: ${{ steps.generate-matrices.outputs.delete }}
+      skipBump: ${{ steps.set-env.outputs.SKIP_BUMP }}
+      skipBuild: ${{ steps.set-env.outputs.SKIP_BUILD }}
     steps:
       - name: Checkout PR
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,11 +38,29 @@ jobs:
       - name: Set env
         id: set-env
         run: |
+          LATEST_COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           echo "LATEST_COMMIT_MESSAGE<<{delimiter}
-          $(git log -1 --pretty=%B)
+          $LATEST_COMMIT_MESSAGE
 
           Built on commit: $(git log -1 --pretty=%H)
           {delimiter}" >> $GITHUB_OUTPUT
+
+          # Commit message markers:
+          #   [skip bumping version] -> skip the version bumping step only
+          #   [skip yuzono ci]       -> skip the version bumping step and the build job
+          skip_bump=false
+          skip_build=false
+          case "$LATEST_COMMIT_MESSAGE" in
+            "[skip yuzono ci]"*)
+              skip_bump=true
+              skip_build=true
+              ;;
+            "[skip bumping version]"*)
+              skip_bump=true
+              ;;
+          esac
+          echo "SKIP_BUMP=$skip_bump" >> $GITHUB_OUTPUT
+          echo "SKIP_BUILD=$skip_build" >> $GITHUB_OUTPUT
 
       - name: Find lib changes
         id: modified-libs
@@ -53,7 +73,7 @@ jobs:
 
       # This step is to alert whether a bumping version might occur.
       - name: Bump extensions that uses a modified lib
-        if: steps.modified-libs.outputs.any_changed == 'true'
+        if: steps.modified-libs.outputs.any_changed == 'true' && steps.set-env.outputs.SKIP_BUMP != 'true'
         env:
           COMMIT_MESSAGE: ${{ steps.set-env.outputs.LATEST_COMMIT_MESSAGE }}
         run: |
@@ -74,7 +94,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ toJson(fromJson(needs.prepare.outputs.matrix).chunk) != '[]' }}
+    if: ${{ needs.prepare.outputs.skipBuild != 'true' && toJson(fromJson(needs.prepare.outputs.matrix).chunk) != '[]' }}
     strategy:
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
