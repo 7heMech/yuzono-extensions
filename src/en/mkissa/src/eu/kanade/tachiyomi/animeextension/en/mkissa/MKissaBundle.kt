@@ -104,8 +104,7 @@ object MKissaBundle {
     // sometimes emits a member access on an object literal evaluating to a
     // number (`e-{_0x1f353a:662}._0x1f353a`, i.e. `e-662`). Normalize those to
     // the literal before folding.
-    private fun foldDelta(expression: String): Int =
-        fold(MEMBER_ACCESS_REGEX.replace(expression, "$1"))
+    private fun foldDelta(expression: String): Int = fold(MEMBER_ACCESS_REGEX.replace(expression, "$1"))
 
     private val MEMBER_ACCESS_REGEX = Regex("""\{[^{}]*:(-?\d+)\}[._][A-Za-z0-9_${'$'}]+""")
 
