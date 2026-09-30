@@ -98,16 +98,20 @@ class MKissa :
         return postGraphQL(body)
     }
 
+    private suspend fun postGraphQL(body: RequestBody): String = retryRateLimited {
+        client.post("$apiUrl/api", postHeaders, body).bodyString()
+    }
+
     // Opening an entry fires details, episodes and related at once, which trips the API's per-IP
     // throttle. It answers with "try again in N seconds", so wait that long instead of failing.
-    private suspend fun postGraphQL(body: RequestBody): String {
+    private suspend fun retryRateLimited(fetch: suspend () -> String): String {
         repeat(MAX_RATE_LIMIT_RETRIES) {
-            val response = client.post("$apiUrl/api", postHeaders, body).bodyString()
+            val response = fetch()
             val waitSeconds = RATE_LIMIT_REGEX.find(response)?.groupValues?.get(1)?.toLongOrNull()
                 ?: return response
             delay((waitSeconds + 1).coerceAtMost(MAX_RATE_LIMIT_WAIT_SECONDS).seconds)
         }
-        return client.post("$apiUrl/api", postHeaders, body).bodyString()
+        return fetch()
     }
 
     // A throttled or failed query comes back as `{"errors": [...], "data": {"show": null}}`; surface
@@ -326,7 +330,9 @@ class MKissa :
                 }
 
             val responseBody = runCatching {
-                client.get(streamUrl(episode, material), streamHeaders(material), CacheControl.FORCE_NETWORK).bodyString()
+                retryRateLimited {
+                    client.get(streamUrl(episode, material), streamHeaders(material), CacheControl.FORCE_NETWORK).bodyString()
+                }
             }.getOrElse {
                 lastError = it
                 null
