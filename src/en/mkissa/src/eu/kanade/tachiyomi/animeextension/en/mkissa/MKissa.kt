@@ -313,7 +313,9 @@ class MKissa :
 
     private suspend fun fetchSourceUrls(episode: SEpisode): List<Episode.SourceUrl> {
         val encryptionChangedError = Exception("MKissa changed its stream encryption; update the extension")
-        var lastError: Throwable? = null
+        // Kept non-null with a single final `throw`: an elvis fallback here compiled to an athrow of a
+        // register R8 had reused for an Object, which the repo inspector's JVM verifier rejects.
+        var lastError: Throwable = encryptionChangedError
         var buildHealed = false
 
         repeat(MAX_KEY_ATTEMPTS) { attempt ->
@@ -363,7 +365,7 @@ class MKissa :
             keyManager.invalidate()
         }
 
-        throw lastError ?: encryptionChangedError
+        throw lastError
     }
 
     private fun streamUrl(episode: SEpisode, material: MKissaKeyManager.Material): HttpUrl {
