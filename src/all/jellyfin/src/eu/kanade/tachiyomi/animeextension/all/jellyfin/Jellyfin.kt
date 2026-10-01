@@ -429,13 +429,13 @@ class Jellyfin(private val suffix: String) :
 
     override suspend fun getSeasonList(anime: SAnime): List<SAnime> {
         val httpUrl = anime.url.toHttpUrl()
-        val itemId = httpUrl.pathSegments[3]
+        val itemId = httpUrl.pathSegments.last()
         val fragment = httpUrl.fragment!!
 
         val url = when {
             fragment.startsWith("boxSet") -> {
                 httpUrl.newBuilder().apply {
-                    removePathSegment(3)
+                    removePathSegment(httpUrl.pathSize - 1)
                     addQueryParameter("SortBy", "SortName")
                     addQueryParameter("SortOrder", "Ascending")
                     addQueryParameter("IncludeItemTypes", "Movie,Season,BoxSet,Series")
@@ -445,8 +445,7 @@ class Jellyfin(private val suffix: String) :
             }
 
             fragment.startsWith("series") -> {
-                httpUrl.newBuilder().apply {
-                    encodedPath("/")
+                baseUrl.toHttpUrl().newBuilder().apply {
                     addPathSegment("Shows")
                     addPathSegment(itemId)
                     addPathSegment("Seasons")
@@ -470,13 +469,20 @@ class Jellyfin(private val suffix: String) :
         val fragment = url.fragment!!
         val itemList = if (fragment == "movie") {
             listOf(client.get(url).parseAs<ItemDto>(json))
+        } else if (fragment.startsWith("boxSet")) {
+            return emptyList()
         } else {
-            val episodesUrl = url.newBuilder().apply {
-                encodedPath("/")
+            val itemId = url.pathSegments.last()
+            val episodesUrl = baseUrl.toHttpUrl().newBuilder().apply {
                 addPathSegment("Shows")
-                addPathSegment(fragment.split(",").last())
-                addPathSegment("Episodes")
-                addQueryParameter("seasonId", url.pathSegments.last())
+                if (fragment.startsWith("season,")) {
+                    addPathSegment(fragment.substringAfter(","))
+                    addPathSegment("Episodes")
+                    addQueryParameter("seasonId", itemId)
+                } else {
+                    addPathSegment(itemId)
+                    addPathSegment("Episodes")
+                }
                 addQueryParameter("userId", preferences.userId)
                 addQueryParameter("Fields", "Overview,MediaSources,DateCreated,OriginalTitle,SortName")
             }.build()
