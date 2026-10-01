@@ -2,8 +2,8 @@ ext {
     extName = 'LaMovie'
     extClass = '.LaMovie'
     themePkg = 'dopeflix'
-    baseUrl = 'https://la.movie'
-    overrideVersionCode = 2
+    baseUrl = 'https://lamovie.la'
+    overrideVersionCode = 3
 }
 
 apply plugin: "kei.plugins.extension.legacy"

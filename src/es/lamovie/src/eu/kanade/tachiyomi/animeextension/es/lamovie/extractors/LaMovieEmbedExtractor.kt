@@ -149,7 +149,7 @@ class LaMovieEmbedExtractor(
         .replace("\\'", "'")
 
     companion object {
-        private const val DEFAULT_ORIGIN = "https://lamovie.link"
+        private const val DEFAULT_ORIGIN = "https://lamovie.la"
 
         private const val MAX_UNPACK_ITERATIONS = 3
         private const val PACKER_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
