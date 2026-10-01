@@ -23,7 +23,7 @@ import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parallelCatchingFlatMapBlocking
 import keiyoushi.utils.useAsJsoup
-import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -34,15 +34,17 @@ class HomeCine :
 
     override val name = "HomeCine"
 
-    override val baseUrl = "https://homecine.cc"
+    override val baseUrl = "https://www3.homecine.to"
 
     override val lang = "es"
 
-    override val supportsLatest = false
+    override val supportsLatest = true
 
     private val preferences by getPreferencesLazy()
 
     companion object {
+        private val NUMBER_REGEX = Regex("""\d+""")
+
         private const val PREF_LANGUAGE_KEY = "preferred_language"
         private const val PREF_LANGUAGE_DEFAULT = "[LAT]"
         private val LANGUAGE_LIST = arrayOf("[LAT]", "[SUB]", "[CAST]")
@@ -65,110 +67,108 @@ class HomeCine :
         )
     }
 
-    override fun popularAnimeRequest(page: Int) = GET("$baseUrl/cartelera-series/page/$page", headers)
+    override fun popularAnimeRequest(page: Int) = GET(listUrl("series", page), headers)
 
     override fun popularAnimeParse(response: Response): AnimesPage {
         val document = response.useAsJsoup()
-        val elements = document.select(".post")
-        val nextPage = document.select(".nav-links .current ~ a").any()
-        val animeList = elements.map { element ->
+        val animeList = document.select(".movies-list .ml-item").map { element ->
             SAnime.create().apply {
-                setUrlWithoutDomain(element.selectFirst(".lnk-blk")?.attr("abs:href") ?: "")
-                title = element.selectFirst(".entry-header .entry-title")?.text() ?: ""
-                description = element.select(".entry-content p").text()
-                thumbnail_url = element.selectFirst(".post-thumbnail figure img")?.let { getImageUrl(it) }
+                setUrlWithoutDomain(element.selectFirst("a.ml-mask")!!.absUrl("href"))
+                title = element.selectFirst(".mli-info h2")!!.text()
+                thumbnail_url = element.selectFirst("img.mli-thumb")?.let { getImageUrl(it) }
             }
         }
-        return AnimesPage(animeList, nextPage)
+        val hasNextPage = document.selectFirst("ul.pagination li.active + li") != null
+        return AnimesPage(animeList, hasNextPage)
     }
 
-    override fun latestUpdatesRequest(page: Int) = popularAnimeRequest(page)
+    override fun latestUpdatesRequest(page: Int) = GET(listUrl("peliculas-nuevas", page), headers)
 
     override fun latestUpdatesParse(response: Response) = popularAnimeParse(response)
 
-    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = GET("$baseUrl/?s=$query", headers)
+    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
+        val url = baseUrl.toHttpUrl().newBuilder().apply {
+            if (page > 1) addPathSegments("page/$page")
+            addQueryParameter("s", query)
+        }.build()
+        return GET(url, headers)
+    }
 
     override fun searchAnimeParse(response: Response) = popularAnimeParse(response)
 
+    private fun listUrl(path: String, page: Int) = if (page > 1) "$baseUrl/$path/page/$page" else "$baseUrl/$path"
+
+    // Links saved before the site redesign used /serie/<slug> and /pelicula/<slug>.
+    private fun migrateUrl(url: String) = when {
+        url.startsWith("/serie/") -> "/series/" + url.removePrefix("/serie/")
+        url.startsWith("/pelicula/") -> "/" + url.removePrefix("/pelicula/")
+        else -> url
+    }
+
+    override fun animeDetailsRequest(anime: SAnime) = GET(baseUrl + migrateUrl(anime.url), headers)
+
+    override fun episodeListRequest(anime: SAnime) = animeDetailsRequest(anime)
+
+    override fun getAnimeUrl(anime: SAnime) = baseUrl + migrateUrl(anime.url)
+
     override fun animeDetailsParse(response: Response): SAnime {
         val document = response.useAsJsoup()
+        val isSeries = document.selectFirst(".mvi-content[itemtype*=TVSeries]") != null
         return SAnime.create().apply {
-            title = document.selectFirst("aside .entry-header .entry-title")?.text() ?: ""
-            description = document.select("aside .description p:not([class])").joinToString { it.text() }
-            thumbnail_url = document.selectFirst(".post-thumbnail img")?.let { getImageUrl(it)?.replace("/w185/", "/w500/") }
-            genre = document.select(".genres a").joinToString { it.text() }
-            status = if (document.location().contains("pelicula")) SAnime.COMPLETED else SAnime.UNKNOWN
+            title = document.selectFirst(".mvic-desc [itemprop=name]")!!.text()
+            description = document.selectFirst(".mvic-desc .desc")?.text()
+            thumbnail_url = document.selectFirst(".mvic-thumb img")?.let { getImageUrl(it)?.replace("/w185/", "/w500/") }
+            genre = document.select(".mvici-left p:contains(Genre) a").joinToString { it.text() }
+            status = if (isSeries) {
+                val tvStatus = document.selectFirst(".mvici-right p:contains(TV Status) span")?.text()?.lowercase().orEmpty()
+                when {
+                    tvStatus.contains("returning") -> SAnime.ONGOING
+                    tvStatus.contains("ended") -> SAnime.COMPLETED
+                    tvStatus.contains("cancel") -> SAnime.CANCELLED
+                    else -> SAnime.UNKNOWN
+                }
+            } else {
+                SAnime.COMPLETED
+            }
         }
     }
 
     private fun getImageUrl(element: Element): String? = when {
-        element.hasAttr("data-src") -> element.attr("abs:data-src")
-        element.hasAttr("src") -> element.attr("abs:src")
+        element.hasAttr("data-original") -> element.absUrl("data-original")
+        element.hasAttr("data-src") -> element.absUrl("data-src")
+        element.hasAttr("src") -> element.absUrl("src")
         else -> null
     }
 
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.useAsJsoup()
-        val referer = response.request.url.toString()
-        return if (referer.contains("pelicula")) {
-            listOf(
+        val seasons = document.select(".tvseason")
+        if (seasons.isEmpty()) {
+            return listOf(
                 SEpisode.create().apply {
                     episode_number = 1f
                     name = "Película"
-                    setUrlWithoutDomain(referer)
+                    setUrlWithoutDomain(response.request.url.toString())
                 },
             )
-        } else {
-            val chunkSize = Runtime.getRuntime().availableProcessors()
-            document.select(".sel-temp a")
-                .sortedByDescending { it.attr("data-season") }
-                .chunked(chunkSize).flatMap { chunk ->
-                    chunk.parallelCatchingFlatMapBlocking { season ->
-                        getDetailSeason(season, referer)
-                    }
-                }.sortedByDescending {
-                    it.name.substringBeforeLast("-")
+        }
+        return seasons.flatMap { season ->
+            val seasonNumber = season.selectFirst(".les-title")?.text()?.let { NUMBER_REGEX.find(it)?.value }
+            season.select(".les-content a").mapIndexed { idx, link ->
+                val epNumber = NUMBER_REGEX.find(link.text())?.value ?: "${idx + 1}"
+                SEpisode.create().apply {
+                    setUrlWithoutDomain(link.absUrl("href"))
+                    name = if (seasonNumber != null) "T$seasonNumber - Episodio $epNumber" else "Episodio $epNumber"
+                    episode_number = epNumber.toFloatOrNull() ?: (idx + 1).toFloat()
                 }
-        }
-    }
-
-    private suspend fun getDetailSeason(element: Element, referer: String): List<SEpisode> {
-        val post = element.attr("data-post")
-        val season = element.attr("data-season")
-        val formBody = FormBody.Builder()
-            .add("action", "action_select_season")
-            .add("season", season)
-            .add("post", post)
-            .build()
-
-        val request = Request.Builder()
-            .url("$baseUrl/wp-admin/admin-ajax.php")
-            .post(formBody)
-            .header("Origin", baseUrl)
-            .header("Referer", referer)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .build()
-        val detail = client.newCall(request).awaitSuccess().useAsJsoup()
-
-        return detail.select(".post").reversed().mapIndexed { idx, it ->
-            val epNumber = try {
-                it.select(".entry-header .num-epi").text().substringAfter("x").substringBefore("–").trim()
-            } catch (_: Exception) {
-                "${idx + 1}"
             }
-
-            SEpisode.create().apply {
-                setUrlWithoutDomain(it.select("a").attr("abs:href"))
-                name = "T$season - Episodio $epNumber"
-                episode_number = epNumber.toFloat()
-            }
-        }
+        }.reversed()
     }
 
     override fun videoListParse(response: Response): List<Video> {
         val document = response.useAsJsoup()
-        return document.select(".aa-tbs-video a").parallelCatchingFlatMapBlocking {
-            val lang = it.select(".server").text().lowercase()
+        return document.select(".player_nav a[href^=#tab]").parallelCatchingFlatMapBlocking { tab ->
+            val lang = tab.text().lowercase()
             val prefix = when {
                 lang.contains("latino") -> "[LAT]"
                 lang.contains("castellano") -> "[CAST]"
@@ -176,10 +176,10 @@ class HomeCine :
                 else -> ""
             }
 
-            val ide = it.attr("href")
-            var src = document.select("$ide iframe").attr("data-src").replace("#038;", "&").replace("&amp;", "")
-            if (src.contains("home")) {
-                src = client.newCall(GET(src)).awaitSuccess().useAsJsoup().selectFirst("iframe")?.attr("src") ?: ""
+            val iframe = document.selectFirst("${tab.attr("href")} iframe") ?: return@parallelCatchingFlatMapBlocking emptyList<Video>()
+            var src = iframe.attr("src").ifEmpty { iframe.attr("data-src") }.replace("#038;", "&").replace("&amp;", "&")
+            if (src.contains("homecine")) {
+                src = client.newCall(GET(src, headers)).awaitSuccess().useAsJsoup().selectFirst("iframe")?.attr("src") ?: ""
             }
 
             when {
