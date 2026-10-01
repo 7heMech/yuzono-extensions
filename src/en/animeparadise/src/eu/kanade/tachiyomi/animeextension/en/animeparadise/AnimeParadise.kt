@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.animeextension.en.animeparadise
 
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -11,15 +12,13 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.utils.AnimeHttpLegacySource
+import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
-import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import uy.kohesive.injekt.injectLazy
 
 class AnimeParadise :
     AnimeHttpLegacySource(),
@@ -31,75 +30,119 @@ class AnimeParadise :
 
     private val apiUrl = "https://api.animeparadise.moe"
 
+    private val streamUrl = "https://stream.animeparadise.moe"
+
     override val lang = "en"
 
     override val supportsLatest = true
 
-    private val json: Json by injectLazy()
-
     private val preferences by getPreferencesLazy()
+
+    private val playlistUtils by lazy { PlaylistUtils(client, headers) }
 
     private val apiHeaders = headers.newBuilder().apply {
         add("Accept", "application/json, text/plain, */*")
-        add("Host", apiUrl.toHttpUrl().host)
         add("Origin", baseUrl)
         add("Referer", "$baseUrl/")
     }.build()
 
-    private val docHeaders = headers.newBuilder().apply {
-        add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-        add("Host", baseUrl.toHttpUrl().host)
+    private val streamHeaders = headers.newBuilder().apply {
+        add("Origin", baseUrl)
+        add("Referer", "$baseUrl/")
     }.build()
 
     // ============================== Popular ===============================
 
-    override fun popularAnimeRequest(page: Int): Request = GET("$apiUrl/?sort={\"rate\": -1}", apiHeaders)
+    override fun popularAnimeRequest(page: Int): Request = searchRequest(page, sort = "POPULARITY")
 
     override fun popularAnimeParse(response: Response): AnimesPage {
-        val animeList = response.parseAs<AnimeListResponse>().data.map { it.toSAnime(json) }
-        return AnimesPage(animeList, false)
+        val result = response.parseAs<AnimeListResponse>()
+        return AnimesPage(result.data.map { it.toSAnime() }, result.pagination.hasNext)
     }
 
     // =============================== Latest ===============================
 
-    override fun latestUpdatesRequest(page: Int): Request = GET("$apiUrl/?sort={\"startDate\": -1 }&type=TV", apiHeaders)
+    override fun latestUpdatesRequest(page: Int): Request {
+        val url = "$apiUrl/ep/recently-added".toHttpUrl().newBuilder()
+            .addQueryParameter("limit", "25")
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("v", "1")
+            .build()
+        return GET(url, apiHeaders)
+    }
 
-    override fun latestUpdatesParse(response: Response): AnimesPage = popularAnimeParse(response)
+    override fun latestUpdatesParse(response: Response): AnimesPage {
+        val result = response.parseAs<RecentEpisodesResponse>()
+        val animeList = result.data.map { it.origin }
+            .distinctBy { it.link }
+            .map { it.toSAnime() }
+        return AnimesPage(animeList, result.pagination.hasNext)
+    }
 
     // =============================== Search ===============================
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
-        val filterList = if (filters.isEmpty()) getFilterList() else filters
-        val genreFilter = filterList.find { it is GenreFilter } as GenreFilter
-
-        val url = when {
-            genreFilter.state != 0 -> apiUrl + genreFilter.toUriPart()
-            else -> "$apiUrl/?title=$query"
-        }
-
-        return GET(url, headers = apiHeaders)
+        val sort = filters.firstInstanceOrNull<SortFilter>()?.toUriPart() ?: "POPULARITY"
+        val genre = filters.firstInstanceOrNull<GenreFilter>()?.toUriPart().orEmpty()
+        return searchRequest(page, query, sort, genre)
     }
 
     override fun searchAnimeParse(response: Response): AnimesPage = popularAnimeParse(response)
 
+    private fun searchRequest(page: Int, query: String = "", sort: String, genre: String = ""): Request {
+        val url = "$apiUrl/search".toHttpUrl().newBuilder().apply {
+            addQueryParameter("sort", sort)
+            addQueryParameter("page", page.toString())
+            if (query.isNotBlank()) {
+                addQueryParameter("q", query)
+            } else if (genre.isNotEmpty()) {
+                addQueryParameter("genres", genre)
+            }
+            addQueryParameter("v", "1")
+        }.build()
+        return GET(url, apiHeaders)
+    }
+
     // ============================== Filters ===============================
 
     override fun getFilterList(): AnimeFilterList = AnimeFilterList(
-        AnimeFilter.Header("NOTE: Filters are going to be ignored if using search text"),
+        AnimeFilter.Header("NOTE: Genre filter is ignored if using search text"),
+        SortFilter(),
         GenreFilter(),
     )
+
+    private class SortFilter :
+        UriPartFilter(
+            "Sort by",
+            arrayOf(
+                Pair("Popularity", "POPULARITY"),
+                Pair("Release date", "RELEASE_DATE"),
+                Pair("Post date", "POST_DATE"),
+            ),
+        )
 
     private class GenreFilter :
         UriPartFilter(
             "Genre",
             arrayOf(
                 Pair("<select>", ""),
-                Pair("Comedy", "/?genre=\"Comedy\""),
-                Pair("Drama", "/?genre=\"Drama\""),
-                Pair("Action", "/?genre=\"Action\""),
-                Pair("Fantasy", "/?genre=\"Fantasy\""),
-                Pair("Supernatural", "/?genre=\"Supernatural\""),
-                Pair("Latest Movie", "/?sort={\"startDate\": -1 }&type=MOVIE"),
+                Pair("Action", "Action"),
+                Pair("Adventure", "Adventure"),
+                Pair("Comedy", "Comedy"),
+                Pair("Drama", "Drama"),
+                Pair("Ecchi", "Ecchi"),
+                Pair("Fantasy", "Fantasy"),
+                Pair("Horror", "Horror"),
+                Pair("Mecha", "Mecha"),
+                Pair("Music", "Music"),
+                Pair("Mystery", "Mystery"),
+                Pair("Psychological", "Psychological"),
+                Pair("Romance", "Romance"),
+                Pair("Sci-Fi", "Sci-Fi"),
+                Pair("Slice of Life", "Slice of Life"),
+                Pair("Sports", "Sports"),
+                Pair("Supernatural", "Supernatural"),
+                Pair("Thriller", "Thriller"),
             ),
         )
 
@@ -109,73 +152,64 @@ class AnimeParadise :
 
     // =========================== Anime Details ============================
 
+    override fun getAnimeUrl(anime: SAnime): String = "$baseUrl/anime/${anime.url.parseAs<LinkData>().slug}"
+
     override fun animeDetailsRequest(anime: SAnime): Request {
-        val data = json.decodeFromString<LinkData>(anime.url)
-        return GET("$baseUrl/anime/${data.slug}", headers = docHeaders)
+        val data = anime.url.parseAs<LinkData>()
+        return GET("$apiUrl/anime/${data.slug}", apiHeaders)
     }
 
-    override fun animeDetailsParse(response: Response): SAnime {
-        val document = response.asJsoup()
-        val data = document.selectFirst("script#__NEXT_DATA__")?.data() ?: return SAnime.create()
-
-        return json.decodeFromString<AnimeDetails>(data).props.pageProps.data.toSAnime()
-    }
+    override fun animeDetailsParse(response: Response): SAnime = response.parseAs<AnimeDetailsResponse>().data.toSAnime()
 
     // ============================== Episodes ==============================
 
     override fun episodeListRequest(anime: SAnime): Request {
-        val data = json.decodeFromString<LinkData>(anime.url)
-        return GET("$apiUrl/anime/${data.id}/episode", headers = apiHeaders)
+        val data = anime.url.parseAs<LinkData>()
+        return GET("$apiUrl/anime/${data.id}/episode", apiHeaders)
     }
 
-    override fun episodeListParse(response: Response): List<SEpisode> {
-        val data = response.parseAs<EpisodeListResponse>()
-        return data.data.map { it.toSEpisode() }.reversed()
-    }
+    override fun episodeListParse(response: Response): List<SEpisode> = response.parseAs<EpisodeListResponse>().data
+        .map { it.toSEpisode() }
+        .reversed()
 
     // ============================ Video Links =============================
 
-    override fun videoListRequest(episode: SEpisode): Request = GET(baseUrl + episode.url, headers = docHeaders)
+    override fun getEpisodeUrl(episode: SEpisode): String = baseUrl + episode.url
+
+    override fun videoListRequest(episode: SEpisode): Request {
+        val watchUrl = (baseUrl + episode.url).toHttpUrl()
+        val url = apiUrl.toHttpUrl().newBuilder()
+            .addPathSegment("ep")
+            .addPathSegment(watchUrl.pathSegments[1])
+            .addQueryParameter("origin", watchUrl.queryParameter("origin"))
+            .build()
+        return GET(url, apiHeaders)
+    }
 
     override fun videoListParse(response: Response): List<Video> {
-        val document = response.asJsoup()
-        val data = json.decodeFromString<VideoData>(
-            document.selectFirst("script#__NEXT_DATA__")!!.data(),
-        ).props.pageProps
+        val episode = response.parseAs<EpisodeDataResponse>().data.episode
+        val streamLink = episode.streamLink ?: return emptyList()
 
-        val subtitleList = data.subtitles?.map {
-            Track(it.src, it.label)
-        } ?: emptyList()
-
-        val videoListUrl = apiUrl.toHttpUrl().newBuilder().apply {
-            addPathSegment("storage")
-            addPathSegment(data.animeData.title)
-            addPathSegment(data.episode.number)
-        }.build().toString()
-
-        val videoObjectList = client.newCall(
-            GET(videoListUrl, headers = apiHeaders),
-        ).execute().parseAs<VideoList>()
-
-        if (videoObjectList.directUrl == null) {
-            throw Exception(videoObjectList.message ?: "Videos not found")
-        }
-
-        val videoHeaders = headers.newBuilder().apply {
-            add("Accept", "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5")
-            add("Host", apiUrl.toHttpUrl().host)
-            add("Referer", "$baseUrl/")
-        }.build()
-
-        return videoObjectList.directUrl.map {
-            val videoUrl = when {
-                it.src.startsWith("//") -> "https:${it.src}"
-                it.src.startsWith("/") -> apiUrl + it.src
-                else -> it.src
+        val subData = episode.subData.orEmpty()
+        val subtitleList = subData.filter { it.type == "ass" }
+            .ifEmpty { subData.filter { it.type == "vtt" } }
+            .map {
+                val subUrl = if (it.src.startsWith("http")) it.src else "$apiUrl/stream/file/${it.src}"
+                Track(subUrl, it.label)
             }
 
-            Video(videoUrl, it.label, videoUrl, headers = videoHeaders, subtitleTracks = subtitleList)
-        }.ifEmpty { throw Exception("Failed to fetch videos") }
+        val playlistUrl = "$streamUrl/m3u8".toHttpUrl().newBuilder()
+            .addQueryParameter("url", streamLink)
+            .build()
+            .toString()
+
+        return playlistUtils.extractFromHls(
+            playlistUrl = playlistUrl,
+            referer = "$baseUrl/",
+            masterHeaders = streamHeaders,
+            videoHeaders = streamHeaders,
+            subtitleList = subtitleList,
+        )
     }
 
     // ============================= Utilities ==============================
