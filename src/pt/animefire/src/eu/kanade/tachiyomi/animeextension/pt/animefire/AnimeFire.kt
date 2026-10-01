@@ -29,7 +29,7 @@ class AnimeFire :
 
     override val name = "Anime Fire"
 
-    override val baseUrl = "https://animefire.io"
+    override val baseUrl = "https://animefire.one"
 
     override val lang = "pt-BR"
 
