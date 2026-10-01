@@ -124,11 +124,27 @@ class DailymotionExtractor(private val client: OkHttpClient, private val headers
 
         val masterHeaders = playlistHeaders ?: headersBuilder()
 
-        return playlistUtils.extractFromHls(
+        val videos = playlistUtils.extractFromHls(
             masterUrl,
             masterHeadersGen = { _, _ -> masterHeaders },
+            videoHeadersGen = { _, _, _ -> masterHeaders },
             subtitleList = subtitleList,
             videoNameGen = { "$prefix$it" },
         )
+
+        // Newer (fMP4) streams keep audio in separate `#EXT-X-MEDIA:TYPE=AUDIO` renditions, so the
+        // variant playlists are video-only. Offer the master playlist first so the player resolves
+        // the audio group itself instead of relying on external audio tracks.
+        val firstVideo = videos.firstOrNull() ?: return videos
+        if (firstVideo.audioTracks.isEmpty()) return videos
+
+        val autoVideo = Video(
+            url = masterUrl,
+            quality = "${prefix}Auto",
+            videoUrl = masterUrl,
+            headers = masterHeaders,
+            subtitleTracks = firstVideo.subtitleTracks,
+        )
+        return listOf(autoVideo) + videos
     }
 }
