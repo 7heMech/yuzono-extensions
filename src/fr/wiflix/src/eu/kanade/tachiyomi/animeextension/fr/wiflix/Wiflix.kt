@@ -23,7 +23,7 @@ import org.jsoup.nodes.Element
 class Wiflix :
     DataLifeEngine(
         "Wiflix",
-        "https://flemmix.best",
+        "https://flemmix.style",
         "fr",
     ) {
     override val categories = arrayOf(
