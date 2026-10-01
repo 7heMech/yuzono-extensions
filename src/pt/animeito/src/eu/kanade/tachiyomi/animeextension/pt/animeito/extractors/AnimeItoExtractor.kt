@@ -34,9 +34,13 @@ class AnimeItoExtractor(private val client: OkHttpClient, private val headers: H
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
     private val m3u8Integration by lazy { M3u8Integration(client) }
 
-    suspend fun videosFromUrl(url: String, serverName: String = ""): List<Video> {
+    suspend fun videosFromUrl(url: String, serverName: String = "", episodeUrl: String? = null): List<Video> {
         val qualityPrefix = qualityPrefix(serverName)
-        val playerDoc = client.newCall(GET(url, headers)).awaitSuccess().useAsJsoup()
+        // AniDrive rejects token embeds that are not requested with the episode page as Referer.
+        val playerHeaders = episodeUrl
+            ?.let { headers.newBuilder().set("Referer", it).build() }
+            ?: headers
+        val playerDoc = client.newCall(GET(url, playerHeaders)).awaitSuccess().useAsJsoup()
 
         // AniDrive embeds multiple TextDecoder scripts (service-worker first, player config later).
         // Decode each until playable sources are found instead of stopping at the first match.
@@ -67,7 +71,7 @@ class AnimeItoExtractor(private val client: OkHttpClient, private val headers: H
         }
 
         Log.w(tag, "No videos extracted from scripts, falling back to WebView")
-        return finalizeVideos(videosFromWebView(url, qualityPrefix))
+        return finalizeVideos(videosFromWebView(url, qualityPrefix, playerHeaders))
     }
 
     private fun qualityPrefix(serverName: String): String {
@@ -168,18 +172,18 @@ class AnimeItoExtractor(private val client: OkHttpClient, private val headers: H
     private fun isPlayableUrl(url: String): Boolean = url.contains("videoplayback") || url.contains(".m3u8") || url.contains(".mp4")
 
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun videosFromWebView(url: String, qualityPrefix: String): List<Video> = withContext(Dispatchers.IO) {
+    private suspend fun videosFromWebView(url: String, qualityPrefix: String, playerHeaders: Headers): List<Video> = withContext(Dispatchers.IO) {
         synchronized(WEB_VIEW_LOCK) {
-            videosFromWebViewInternal(url, qualityPrefix)
+            videosFromWebViewInternal(url, qualityPrefix, playerHeaders)
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun videosFromWebViewInternal(url: String, qualityPrefix: String): List<Video> {
+    private fun videosFromWebViewInternal(url: String, qualityPrefix: String, playerHeaders: Headers): List<Video> {
         val latch = CountDownLatch(1)
         var webView: WebView? = null
         var jsResult = ""
-        val loadHeaders = headers.toMultimap().mapValues { entry -> entry.value.getOrNull(0) ?: "" }
+        val loadHeaders = playerHeaders.toMultimap().mapValues { entry -> entry.value.getOrNull(0) ?: "" }
         val jsInterface = PlayerJSInterface(latch) { jsResult = it }
 
         try {
