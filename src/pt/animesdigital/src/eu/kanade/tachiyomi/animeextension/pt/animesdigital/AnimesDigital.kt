@@ -66,7 +66,7 @@ class AnimesDigital :
         return super.getLatestUpdates(page)
     }
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/lancamentos/page/$page")
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/lancamentos01/page/$page/")
 
     override fun latestUpdatesSelector() = "div.b_flex > div.itemE > a"
 
@@ -115,9 +115,11 @@ class AnimesDigital :
     }
 
     private val searchToken by lazy {
-        client.newCall(GET("$baseUrl/animes-legendados-online")).execute().useAsJsoup()
-            .selectFirst("div.menu_filter_box")!!
-            .attr("data-secury")
+        client.newCall(GET("$baseUrl/animes-legendados-online001")).execute().useAsJsoup()
+            .selectFirst("div.menu_filter_box")
+            ?.attr("data-secury")
+            ?.ifEmpty { null }
+            ?: throw Exception("Token de busca não encontrado")
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
@@ -175,7 +177,9 @@ class AnimesDigital :
     override fun animeDetailsParse(document: Document) = SAnime.create().apply {
         val doc = getRealDoc(document)
         setUrlWithoutDomain(doc.location())
-        thumbnail_url = doc.selectFirst("div.poster > img")?.attr("data-lazy-src")
+        thumbnail_url = doc.selectFirst("div.poster > img")?.let {
+            it.attr("data-lazy-src").ifEmpty { it.attr("src") }
+        }
         status = when (doc.selectFirst("div.clw > div.playon")?.text()) {
             "Em Lançamento" -> SAnime.ONGOING
             "Completo" -> SAnime.COMPLETED

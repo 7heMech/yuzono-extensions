@@ -72,7 +72,7 @@ class AnimesDigitalFilters(
         if (!filterInitialized()) {
             runCatching {
                 error = false
-                val document = client.newCall(GET("$baseUrl/animes-legendados-online"))
+                val document = client.newCall(GET("$baseUrl/animes-legendados-online001"))
                     .execute()
                     .useAsJsoup()
                 filterList = filtersParse(document)
