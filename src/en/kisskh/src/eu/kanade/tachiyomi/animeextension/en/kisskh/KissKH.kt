@@ -273,6 +273,7 @@ class KissKH :
             "kisskh.co",
             "kisskh.id",
             "kisskh.la",
+            "kisskh.is",
         )
         private val DOMAIN_VALUES = DOMAIN_ENTRIES.map { "https://$it" }
         private val PREF_DOMAIN_DEFAULT = DOMAIN_VALUES[0]
