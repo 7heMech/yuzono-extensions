@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemListDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemType
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.LoginDto
+import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.LoginRequestDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.MediaLibraryDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.PlaybackInfoDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.SessionDto
@@ -34,6 +35,7 @@ import keiyoushi.utils.addListPreference
 import keiyoushi.utils.addSetPreference
 import keiyoushi.utils.addSwitchPreference
 import keiyoushi.utils.delegate
+import keiyoushi.utils.firstInstance
 import keiyoushi.utils.formatBytes
 import keiyoushi.utils.get
 import keiyoushi.utils.getListPreference
@@ -49,8 +51,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import okhttp3.Dns
 import okhttp3.Headers
 import okhttp3.HttpUrl
@@ -158,7 +158,7 @@ class Jellyfin(private val suffix: String) :
     ): AnimesPage {
         checkPreferences()
         val filterList = filters.ifEmpty { getFilterList() }
-        filterList.filterIsInstance<TypeFilter>().first().let {
+        filterList.firstInstance<TypeFilter>().let {
             itemTypes = it.state.filter { s -> s.state }.map { s -> s.id }
             if (preferences.saveTypes) {
                 preferences.saveTypesValue = itemTypes.toJsonString(json)
@@ -605,7 +605,6 @@ class Jellyfin(private val suffix: String) :
         val sessionMediaSource = sessionData.mediaSources.firstOrNull()
             ?: return emptyList()
 
-        // Build video list
         if (sessionMediaSource.supportsDirectStream) {
             videoList.add(staticVideo)
         }
@@ -640,7 +639,7 @@ class Jellyfin(private val suffix: String) :
     }
 
     @Serializable
-    data class TranscodingInfo(
+    class TranscodingInfo(
         val videoBitrate: Int,
         val audioBitrate: Int,
         val mediaId: String,
@@ -754,10 +753,7 @@ class Jellyfin(private val suffix: String) :
     private suspend fun authenticate(username: String, password: String): LoginDto {
         val authHeaders = Headers.headersOf("Authorization", getAuthHeader(deviceInfo))
 
-        val body = buildJsonObject {
-            put("Username", username)
-            put("Pw", password)
-        }.toJsonRequestBody(json)
+        val body = LoginRequestDto(username, password).toJsonRequestBody(json)
 
         return try {
             val resp = client.post(
@@ -959,7 +955,6 @@ class Jellyfin(private val suffix: String) :
                 mediaLibraryPref.entries = libraryList.map { it.name }.toTypedArray()
                 mediaLibraryPref.entryValues = libraryList.map { it.id }.toTypedArray()
 
-                // Only enable the preference if login succeeded
                 mediaLibraryPref.setEnabled(true)
             } else {
                 clearCredentials()
