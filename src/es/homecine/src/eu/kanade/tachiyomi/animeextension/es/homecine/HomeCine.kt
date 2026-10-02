@@ -44,6 +44,7 @@ class HomeCine :
 
     companion object {
         private val NUMBER_REGEX = Regex("""\d+""")
+        private val QUALITY_REGEX = Regex("""(\d+)p""")
 
         private const val PREF_LANGUAGE_KEY = "preferred_language"
         private const val PREF_LANGUAGE_DEFAULT = "[LAT]"
@@ -203,7 +204,7 @@ class HomeCine :
                     VoeExtractor(client, headers).videosFromUrl(src, prefix = "$prefix ")
                 }
 
-                src.contains("wishembed") || src.contains("streamwish") || src.contains("wish") -> {
+                src.contains("wish") -> {
                     StreamWishExtractor(client, headers).videosFromUrl(src) { "$prefix StreamWish:$it" }
                 }
 
@@ -233,7 +234,7 @@ class HomeCine :
                 { it.videoTitle.contains(lang) },
                 { it.videoTitle.contains(server, true) },
                 { it.videoTitle.contains(quality) },
-                { Regex("""(\d+)p""").find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { QUALITY_REGEX.find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
