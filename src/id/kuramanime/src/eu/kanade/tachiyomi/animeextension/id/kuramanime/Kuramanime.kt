@@ -42,7 +42,7 @@ class Kuramanime :
     private val preferences by getPreferencesLazy()
 
     // ============================== Popular ===============================
-    override fun popularAnimeRequest(page: Int) = GET("$baseUrl/anime?page=$page")
+    override fun popularAnimeRequest(page: Int) = GET("$baseUrl/anime?page=$page", headers)
 
     override fun popularAnimeSelector() = "div.filter__gallery > a"
 
@@ -55,7 +55,7 @@ class Kuramanime :
     override fun popularAnimeNextPageSelector() = "div.product__pagination > a:last-child:not([aria-disabled='true'])"
 
     // =============================== Latest ===============================
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/anime?order_by=updated&page=$page")
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/anime?order_by=updated&page=$page", headers)
 
     override fun latestUpdatesSelector() = popularAnimeSelector()
 
@@ -64,7 +64,7 @@ class Kuramanime :
     override fun latestUpdatesNextPageSelector() = popularAnimeNextPageSelector()
 
     // =============================== Search ===============================
-    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = GET("$baseUrl/anime?search=$query&page=$page")
+    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = GET("$baseUrl/anime?search=$query&page=$page", headers)
 
     override fun searchAnimeSelector() = popularAnimeSelector()
 
@@ -232,9 +232,6 @@ class Kuramanime :
             when (server) {
                 "filelions" if url != null -> streamWishExtractor.videosFromUrl(url)
                 "filemoon" if url != null -> filemoonExtractor.videosFromUrl(url)
-
-                // mega.nz source
-                // server == "mega" && url != null -> streamtapeExtractor.videosFromUrl(url)
                 "streamwish" if url != null -> streamWishExtractor.videosFromUrl(url)
                 "streamtape" if url != null -> streamtapeExtractor.videosFromUrl(url)
                 "vidguard" if url != null -> vidguardExtractor.videosFromUrl(url)
@@ -340,13 +337,6 @@ class Kuramanime :
             entryValues = PREF_QUALITY_VALUES
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
     }
 
