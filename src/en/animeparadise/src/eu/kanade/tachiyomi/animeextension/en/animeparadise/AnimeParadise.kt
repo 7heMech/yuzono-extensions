@@ -220,7 +220,7 @@ class AnimeParadise :
         return this.sortedWith(
             compareBy(
                 { it.videoTitle.contains(quality) },
-                { Regex("""(\d+)p""").find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { QUALITY_REGEX.find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
@@ -228,7 +228,10 @@ class AnimeParadise :
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080"
+
+        private val QUALITY_REGEX = Regex("""(\d+)p""")
     }
+
     // ============================== Settings ==============================
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
@@ -239,13 +242,6 @@ class AnimeParadise :
             entryValues = arrayOf("1080", "720", "480", "360")
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
     }
 }
