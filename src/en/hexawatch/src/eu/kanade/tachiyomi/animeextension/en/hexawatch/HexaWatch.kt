@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.network.get
 import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.addEditTextPreference
 import keiyoushi.utils.addListPreference
@@ -24,6 +25,7 @@ import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.CacheControl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -41,7 +43,7 @@ class HexaWatch :
 
     override val baseUrl = "https://hexa.su"
     private val animeUrl = "$baseUrl/details"
-    private val apiUrl = "https://themoviedb.hexa.su/api/tmdb"
+    private val apiUrl = "https://theemoviedb.hexa.su/api/tmdb"
     private val subtitleUrl = "https://sub.wyzie.ru"
     private val decryptionApiUrl = "https://enc-dec.app/api/dec-hexa"
 
@@ -54,6 +56,8 @@ class HexaWatch :
     private val preferences by getPreferencesLazy()
 
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
+
+    private val capTokenProvider by lazy { CapTokenProvider(headers["User-Agent"]) }
 
     // ============================== Popular ===============================
     override fun popularAnimeRequest(page: Int): Request {
@@ -350,34 +354,52 @@ class HexaWatch :
     }
 
     // ============================ Video Links =============================
-    override suspend fun getVideoList(episode: SEpisode): List<Video> = client.newCall(videoListRequest(episode))
-        .awaitSuccess()
-        .use { response ->
-            videoListParseAsync(response)
-        }
-
-    override fun videoListRequest(episode: SEpisode): Request {
+    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+        val requestUrl = videoRequestUrl(episode)
         val key = ByteArray(32).apply { SECURE_RANDOM.nextBytes(this) }
             .joinToString("") { "%02x".format(it) }
 
-        val videoHeaders = headers.newBuilder()
-            .add("X-Api-Key", key)
-            .build()
+        val encryptedText = fetchEncryptedSources(requestUrl, key)
+        return videoListParseAsync(requestUrl, encryptedText, key)
+    }
 
+    private fun videoRequestUrl(episode: SEpisode): String {
         val path = episode.url.split("/").drop(1)
-        val requestUrl = when (path.first()) {
+        return when (path.first()) {
             "movie" -> "$apiUrl/movie/${path[1]}/images"
             "tv" -> "$apiUrl/tv/${path[1]}/season/${path[2]}/episode/${path[3]}/images"
             else -> throw Exception("Invalid media type for video request")
         }
-        return GET(requestUrl, videoHeaders)
+    }
+
+    private suspend fun fetchEncryptedSources(requestUrl: String, key: String): String {
+        var capToken = capTokenProvider.getToken()
+        for (attempt in 1..CAPTCHA_ATTEMPTS) {
+            val videoHeaders = headers.newBuilder()
+                .set("Accept", "text/plain")
+                .set("Referer", "$baseUrl/")
+                .add("X-Api-Key", key)
+                .add("X-Fingerprint-Lite", FINGERPRINT_LITE)
+                .add("X-Cap-Token", capToken)
+                .build()
+
+            val (code, body) = client.get(requestUrl, videoHeaders, CacheControl.FORCE_NETWORK, ensureSuccess = false)
+                .use { it.code to it.body.string() }
+
+            when {
+                code in 200..299 -> return body
+                code == 403 && "captcha_required" in body -> {
+                    capTokenProvider.invalidate(capToken)
+                    if (attempt < CAPTCHA_ATTEMPTS) capToken = capTokenProvider.getToken()
+                }
+                else -> throw Exception("HTTP error $code")
+            }
+        }
+        throw Exception("The captcha token was rejected by the server")
     }
 
     override fun videoListParse(response: Response): List<Video> = throw UnsupportedOperationException()
-    private suspend fun videoListParseAsync(response: Response): List<Video> {
-        val encryptedText = response.body.string()
-        val key = response.request.header("X-Api-Key") ?: throw Exception("API Key was not sent in the request")
-
+    private suspend fun videoListParseAsync(requestUrl: String, encryptedText: String, key: String): List<Video> {
         val decryptionPayload = json.encodeToString(mapOf("text" to encryptedText, "key" to key))
         val requestBody = decryptionPayload.toJsonRequestBody()
 
@@ -387,7 +409,7 @@ class HexaWatch :
             decryptionResponse.parseAs<ExtractorResponseDto>()
         }
 
-        val subtitles = getSubtitles(response.request.url.toString())
+        val subtitles = getSubtitles(requestUrl)
 
         val videos = extractorData.result.sources.parallelFlatMap { source ->
             runCatching {
@@ -494,6 +516,10 @@ class HexaWatch :
     companion object {
 
         private val SECURE_RANDOM by lazy { SecureRandom() }
+
+        // Constant sent by the site's own fetch wrapper on every source request.
+        private const val FINGERPRINT_LITE = "e9136c41504646444"
+        private const val CAPTCHA_ATTEMPTS = 2
 
         private val GET_SUBTITLES_REGEX by lazy { "/(movie|tv)/(\\d+)(?:/season/(\\d+)/episode/(\\d+))?".toRegex() }
 
