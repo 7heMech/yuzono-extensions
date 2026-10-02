@@ -65,11 +65,9 @@ class TitleDetailsDto(
             "ended" -> SAnime.COMPLETED
             else -> SAnime.UNKNOWN
         }
-        val animeGenres = genres.joinToString { it.displayName }
-        val animePoster = poster
         return SAnime.create().apply {
-            thumbnail_url = animePoster
-            genre = animeGenres
+            thumbnail_url = poster
+            genre = genres.joinToString { it.displayName }
             author = directors
             artist = actors
             status = animeStatus

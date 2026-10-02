@@ -203,7 +203,7 @@ class Pandrama :
             compareBy(
                 { it.videoTitle.contains(server, true) },
                 { it.videoTitle.contains(quality) },
-                { Regex("""(\d+)p""").find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { QUALITY_REGEX.find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
@@ -248,6 +248,7 @@ class Pandrama :
         private val SERVER_LIST = arrayOf("Vk", "Okru")
 
         private const val DATE_LENGTH = 10
+        private val QUALITY_REGEX = Regex("""(\d+)p""")
         private val EPISODE_URL_REGEX = Regex("""/titles/(\d+)/[^/]+/season/(\d+)/episode/(\d+)""")
     }
 }
