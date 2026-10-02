@@ -15,13 +15,11 @@ import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.utils.ParsedAnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
-import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.injectLazy
 
 class AnimeFire :
     ParsedAnimeHttpLegacySource(),
@@ -34,8 +32,6 @@ class AnimeFire :
     override val lang = "pt-BR"
 
     override val supportsLatest = true
-
-    private val json: Json by injectLazy()
 
     private val preferences by getPreferencesLazy()
 
@@ -76,7 +72,7 @@ class AnimeFire :
     override suspend fun getSearchAnime(page: Int, query: String, filters: AnimeFilterList): AnimesPage {
         if (query.startsWith("https://")) {
             val url = query.toHttpUrl()
-            if (url.host != baseUrl.toHttpUrl().host) {
+            if (url.host != baseUrl.toHttpUrl().host && url.host !in LEGACY_HOSTS) {
                 throw Exception("Unsupported url")
             }
             val id = url.pathSegments.getOrNull(1)
@@ -160,7 +156,7 @@ class AnimeFire :
         val document = response.asJsoup()
         val videoElement = document.selectFirst("video#my-video")
         return if (videoElement != null) {
-            AnimeFireExtractor(client, json).videoListFromElement(videoElement, headers)
+            AnimeFireExtractor(client).videoListFromElement(videoElement, headers)
         } else {
             IframeExtractor(client).videoListFromDocument(document, headers)
         }
@@ -184,7 +180,7 @@ class AnimeFire :
     override fun getFilterList(): AnimeFilterList = AFFilters.FILTER_LIST
 
     // ============================= Utilities ==============================
-    private fun parseStatus(statusString: String?): Int = when (statusString?.trim()) {
+    private fun parseStatus(statusString: String?): Int = when (statusString) {
         "Completo" -> SAnime.COMPLETED
         "Em lançamento" -> SAnime.ONGOING
         else -> SAnime.UNKNOWN
@@ -201,6 +197,7 @@ class AnimeFire :
 
     companion object {
         const val PREFIX_SEARCH = "id:"
+        private val LEGACY_HOSTS = setOf("animefire.io", "animefire.plus")
         private const val ACCEPT_LANGUAGE = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
 
         private const val PREF_QUALITY_KEY = "preferred_quality"
