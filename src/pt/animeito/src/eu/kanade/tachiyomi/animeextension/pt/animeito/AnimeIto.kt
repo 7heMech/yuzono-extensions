@@ -15,7 +15,6 @@ class AnimeIto :
         "https://animesonline.io",
     ) {
 
-    // ============================ Video Links =============================
     override val prefQualityValues = listOf("1080p", "720p", "480p", "360p", "240p")
 
     // ============================ Video Links =============================
@@ -42,7 +41,7 @@ class AnimeIto :
 
     private suspend fun getVideoList(url: String, name: String, episodeUrl: String): List<Video> = when {
         // Embed = googlevideo/blogger MP4; Prime = HLS (.image segments via m3u8server)
-        "anidrive.click" in url -> animeitoExtractor.videosFromUrl(url, name.trim(), episodeUrl)
+        "anidrive.click" in url -> animeitoExtractor.videosFromUrl(url, name, episodeUrl)
         else -> emptyList()
     }
 }
