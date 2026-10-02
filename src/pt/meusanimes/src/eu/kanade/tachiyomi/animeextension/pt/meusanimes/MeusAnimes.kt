@@ -50,9 +50,9 @@ class MeusAnimes : AnimeHttpLegacySource() {
     }
 
     // =============================== Latest ===============================
-    override fun latestUpdatesRequest(page: Int): Request = popularAnimeRequest(page)
+    override fun latestUpdatesRequest(page: Int): Request = throw UnsupportedOperationException()
 
-    override fun latestUpdatesParse(response: Response): AnimesPage = popularAnimeParse(response)
+    override fun latestUpdatesParse(response: Response): AnimesPage = throw UnsupportedOperationException()
 
     // =============================== Search ===============================
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
@@ -150,9 +150,6 @@ class MeusAnimes : AnimeHttpLegacySource() {
         "blogger.com" in url -> bloggerExtractor.videosFromUrl(url, headers)
         else -> emptyList()
     }
-
-    // ============================= Utilities ==============================
-    override fun getFilterList(): AnimeFilterList = AnimeFilterList()
 
     companion object {
         private val dateFormat = SimpleDateFormat("MMM. dd, yyyy", Locale.ENGLISH)
