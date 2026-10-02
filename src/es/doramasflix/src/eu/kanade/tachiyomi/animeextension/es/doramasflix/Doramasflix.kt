@@ -87,9 +87,8 @@ class Doramasflix :
         private const val PREF_SERVER_DEFAULT = "Voe"
         private val SERVER_LIST = arrayOf(
             "YourUpload", "BurstCloud", "Voe", "Mp4Upload", "Doodstream",
-            "Upload", "BurstCloud", "Upstream", "StreamTape", "Amazon",
-            "Fastream", "Filemoon", "StreamWish", "Okru", "Streamlare",
-            "Uqload",
+            "Upload", "Upstream", "StreamTape", "Fastream", "Filemoon",
+            "StreamWish", "Okru", "Streamlare", "Uqload",
         )
 
         private const val DORAMA_PATH = "doramas-online"
@@ -125,6 +124,7 @@ class Doramasflix :
         private val ACTION_ID_REGEX = Regex("""createServerReference\)?\("([0-9a-f]+)"[^"]*"(\w+)"\)""")
         private val CHUNK_REGEX = Regex("""/_next/static/chunks/[A-Za-z0-9_~.\-]+\.js""")
         private val FLIGHT_ROOT_REGEX = Regex("""\$@([0-9a-f]+)""")
+        private val QUALITY_REGEX = Regex("""(\d+)p""")
 
         // Server code -> token matched against by serverVideoResolver
         private val SERVERS = mapOf(
@@ -363,7 +363,7 @@ class Doramasflix :
         }.getOrDefault(this)
     }
 
-    private suspend fun serverVideoResolver(url: String, prefix: String = "", server: String? = null): List<Video> {
+    private suspend fun serverVideoResolver(url: String, prefix: String, server: String?): List<Video> {
         val embedUrl = server ?: url.lowercase()
         return when {
             "voe" in embedUrl -> VoeExtractor(client, headers).videosFromUrl(url, " $prefix")
@@ -385,7 +385,7 @@ class Doramasflix :
             "mixdrop" in embedUrl -> MixDropExtractor(client).videosFromUrl(url, prefix = "$prefix ")
 
             "doodstream" in embedUrl || "dood." in embedUrl ->
-                listOf(DoodExtractor(client).videoFromUrl(url.replace("https://doodstream.com/e/", "https://dood.to/e/"), "$prefix DoodStream")!!)
+                listOfNotNull(DoodExtractor(client).videoFromUrl(url.replace("https://doodstream.com/e/", "https://dood.to/e/"), "$prefix DoodStream"))
 
             "streamlare" in embedUrl -> StreamlareExtractor(client).videosFromUrl(url, prefix = prefix)
 
@@ -406,7 +406,7 @@ class Doramasflix :
             "upstream" in embedUrl -> UpstreamExtractor(client).videosFromUrl(url, prefix = "$prefix ")
 
             "streamtape" in embedUrl || "stp" in embedUrl || "stape" in embedUrl ->
-                listOf(StreamTapeExtractor(client).videoFromUrl(url, quality = "$prefix StreamTape")!!)
+                listOfNotNull(StreamTapeExtractor(client).videoFromUrl(url, quality = "$prefix StreamTape"))
 
             "ahvsh" in embedUrl || "streamhide" in embedUrl ->
                 VidHideExtractor(client, headers).videosFromUrl(url, videoNameGen = { "$prefix StreamHide:$it" })
@@ -457,7 +457,7 @@ class Doramasflix :
                 { it.videoTitle.contains(lang) },
                 { it.videoTitle.contains(server, true) },
                 { it.videoTitle.contains(quality) },
-                { Regex("""(\d+)p""").find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { QUALITY_REGEX.find(it.videoTitle)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
@@ -470,13 +470,6 @@ class Doramasflix :
             entryValues = LANGUAGE_LIST
             setDefaultValue(PREF_LANGUAGE_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
@@ -486,13 +479,6 @@ class Doramasflix :
             entryValues = QUALITY_LIST
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
@@ -502,13 +488,6 @@ class Doramasflix :
             entryValues = SERVER_LIST
             setDefaultValue(PREF_SERVER_DEFAULT)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
-            }
         }.also(screen::addPreference)
     }
 }
