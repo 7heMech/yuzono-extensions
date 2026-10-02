@@ -71,6 +71,8 @@ class AnimeAv1 :
         private val SERVER_REGEX = Regex("""\{\s*server\s*:\s*"([^"]*)"\s*,\s*url\s*:\s*"([^"]*)"\s*\}""")
         private val SUB_REGEX = Regex("""SUB\s*:\s*\[([^]]*)]""")
         private val DUB_REGEX = Regex("""DUB\s*:\s*\[([^]]*)]""")
+        private val EPISODE_LIST_REGEX = Regex("""episodes\s*:\s*\[([^]]*)]""")
+        private val EPISODE_REGEX = Regex("""\{\s*id\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*number\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*\}""")
     }
 
     override fun animeDetailsParse(response: Response): SAnime {
@@ -124,11 +126,9 @@ class AnimeAv1 :
     override fun episodeListParse(response: Response): List<SEpisode> {
         val doc = response.useAsJsoup()
         val script = doc.selectFirst("script:containsData(node_ids)")?.data().orEmpty()
-        val episodeListRegex = """episodes\s*:\s*\[([^]]*)]""".toRegex()
-        val episodeRegex = """\{\s*id\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*number\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*\}""".toRegex()
         val baseUrl = doc.location().substringBefore("?").substringBefore("#")
-        val episodes = episodeListRegex.find(script)?.let {
-            episodeRegex.findAll(it.groupValues[1]).map { match ->
+        val episodes = EPISODE_LIST_REGEX.find(script)?.let {
+            EPISODE_REGEX.findAll(it.groupValues[1]).map { match ->
                 val number = match.groupValues[2]
                 SEpisode.create().apply {
                     name = "Episodio $number"
@@ -182,9 +182,9 @@ class AnimeAv1 :
     private val unsExtractor by lazy { UnsExtractor(client, headers) }
     private val streamTapeExtractor by lazy { StreamTapeExtractor(client) }
 
-    private suspend fun serverVideoResolver(url: String, prefix: String = "", serverName: String? = ""): List<Video> {
+    private suspend fun serverVideoResolver(url: String, prefix: String, serverName: String): List<Video> {
         val host = url.toHttpUrlOrNull()?.host.orEmpty().lowercase(Locale.ROOT)
-        val matched = findServer(host) ?: findServer(serverName.orEmpty().lowercase(Locale.ROOT))
+        val matched = findServer(host) ?: findServer(serverName.lowercase(Locale.ROOT))
         return when (matched) {
             "uns" -> unsExtractor.videosFromUrl(url, "$prefix ")
             "voe" -> voeExtractor.videosFromUrl(url, "$prefix ")
@@ -220,7 +220,7 @@ class AnimeAv1 :
         "player.zilla" to listOf("player.zilla"),
         "streamwish" to listOf("wishembed", "streamwish", "strwish", "wish", "Kswplayer", "Swhoi", "Multimovies", "Uqloads", "neko-stream", "swdyu", "iplayerhls", "streamgg"),
         "filelions" to listOf("filelions", "lion", "fviplions"),
-        "doodstream" to listOf("doodstream", "dood.", "ds2play", "doods.", "ds2play", "ds2video", "dooood", "d000d", "d0000d"),
+        "doodstream" to listOf("doodstream", "dood.", "ds2play", "doods.", "ds2video", "dooood", "d000d", "d0000d"),
         "yourupload" to listOf("yourupload", "upload"),
         "vidhide" to listOf("ahvsh", "streamhide", "guccihide", "streamvid", "vidhide", "kinoger", "smoothpre", "dhtpre", "peytonepre", "earnvids", "ryderjet"),
     )
