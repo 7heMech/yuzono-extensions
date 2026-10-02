@@ -91,12 +91,7 @@ class KissKH :
 
     override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/api/DramaList/List?page=$page&type=0&sub=0&country=0&status=0&order=2&pageSize=40")
 
-    override fun latestUpdatesParse(response: Response): AnimesPage {
-        val responseString = response.body.string()
-        return parseLatestAnimeJson(responseString)
-    }
-
-    private fun parseLatestAnimeJson(jsonData: String) = parsePopularAnimeJson(jsonData)
+    override fun latestUpdatesParse(response: Response): AnimesPage = popularAnimeParse(response)
 
     /* Search */
 
@@ -243,11 +238,7 @@ class KissKH :
     }
 
     @Serializable
-    data class Key(
-        val id: String,
-        val version: String,
-        val key: String,
-    )
+    private class Key(val key: String)
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addListPreference(

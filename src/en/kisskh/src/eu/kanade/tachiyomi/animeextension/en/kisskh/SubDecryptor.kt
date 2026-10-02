@@ -1,22 +1,14 @@
 package eu.kanade.tachiyomi.animeextension.en.kisskh
 
 import android.net.Uri
-import android.util.Log
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.lib.cryptoaes.CryptoAES
 import keiyoushi.utils.bodyString
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import java.io.File
-import java.io.IOException
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
-import kotlin.collections.listOf
-import kotlin.getValue
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
 
 class SubDecryptor(private val client: OkHttpClient, private val headers: Headers, private val baseurl: String) {
     suspend fun getSubtitles(subUrl: String, subLang: String): Track {
@@ -37,7 +29,7 @@ class SubDecryptor(private val client: OkHttpClient, private val headers: Header
         val decrypted = chunks.mapIndexed { index, chunk ->
             val parts = chunk.split("\n")
             val text = parts.slice(1 until parts.size)
-            val d = text.joinToString("\n") { runCatching { decrypt(it) }.getOrDefault("") }
+            val d = text.joinToString("\n") { decrypt(it) }
 
             listOf(index + 1, parts.first(), d).joinToString("\n")
         }.joinToString("\n\n")
@@ -68,26 +60,9 @@ class SubDecryptor(private val client: OkHttpClient, private val headers: Header
         )
     }
 
-    @OptIn(ExperimentalEncodingApi::class)
-    private fun decrypt(encryptedB64: String): String {
-        if (encryptedB64.isBlank()) return ""
-        val encryptedBytes = Base64.decode(encryptedB64) // Decode Base64 input
-
-        for ((keyBytes, ivBytes) in keyIvPairs) {
-            try {
-                return decryptWithKeyIv(keyBytes, ivBytes, encryptedBytes)
-            } catch (ex: Exception) {
-                Log.e("KissKH:SubDecryptor", "Decryption attempt failed with key/IV pair. Error: ${ex.message}", ex)
-            }
-        }
-        throw IOException("Decryption failed: All keys/IVs failed")
-    }
-
-    private fun decryptWithKeyIv(keyBytes: ByteArray, ivBytes: ByteArray, encryptedBytes: ByteArray): String {
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(ivBytes))
-        return String(cipher.doFinal(encryptedBytes), Charsets.UTF_8)
-    }
+    private fun decrypt(encryptedB64: String): String = keyIvPairs.firstNotNullOfOrNull { (keyBytes, ivBytes) ->
+        CryptoAES.decrypt(encryptedB64, keyBytes, ivBytes).takeIf(String::isNotEmpty)
+    }.orEmpty()
 
     private fun IntArray.toByteArray(): ByteArray = ByteArray(size * 4).also { bytes ->
         forEachIndexed { index, value ->
