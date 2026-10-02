@@ -14,7 +14,6 @@ dependencies {
     implementation(project(':lib:streamwishextractor'))
     implementation(project(':lib:vidhideextractor'))
     implementation(project(':lib:voeextractor'))
-    implementation(project(':lib:pixeldrainextractor'))
     implementation(project(':lib:mp4uploadextractor'))
     implementation(project(':lib:youruploadextractor'))
     implementation(project(':lib:filemoonextractor'))

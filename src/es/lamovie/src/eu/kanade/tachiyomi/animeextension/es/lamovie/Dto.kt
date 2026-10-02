@@ -22,9 +22,9 @@ class ItemResponseDto(
 
 @Serializable
 class ItemDto(
-    @SerialName("tmdb_id") val tmdbId: Long,
-    val kind: String,
-    val title: String,
+    @SerialName("tmdb_id") private val tmdbId: Long,
+    private val kind: String,
+    private val title: String,
     @SerialName("original_title") private val originalTitle: String? = null,
     @SerialName("poster_path") private val posterPath: String? = null,
     private val overview: String? = null,
@@ -105,4 +105,10 @@ class EmbedItem(
     val url: String,
     val quality: String? = null,
     @SerialName("lang") val language: String? = null,
+)
+
+@Serializable
+class EmbedConfigDto(
+    val file: String? = null,
+    val subtitle: String? = null,
 )

@@ -225,15 +225,6 @@ class LaMovie :
         val preferredQualityLower = preferredQuality.lowercase(Locale.US)
         val preferredQualityValue = QUALITY_REGEX.find(preferredQualityLower)?.groupValues?.get(1)?.toIntOrNull()
 
-        val qualityKeywordsByValue = mapOf(
-            2160 to listOf("2160", "4k", "uhd"),
-            1440 to listOf("1440", "2k", "qhd"),
-            1080 to listOf("1080", "fhd", "full hd"),
-            720 to listOf("720", "hd"),
-            480 to listOf("480", "sd"),
-            360 to listOf("360"),
-        )
-
         fun Video.matchesPreferredQuality(): Boolean {
             val normalized = videoTitle.lowercase(Locale.US)
             if (normalized.contains(preferredQualityLower)) return true
@@ -241,7 +232,7 @@ class LaMovie :
             val numericQuality = QUALITY_REGEX.find(normalized)?.groupValues?.get(1)?.toIntOrNull()
             if (preferredQualityValue != null && numericQuality != null && numericQuality == preferredQualityValue) return true
 
-            val aliases = qualityKeywordsByValue[preferredQualityValue]
+            val aliases = QUALITY_KEYWORDS[preferredQualityValue]
             return !aliases.isNullOrEmpty() && aliases.any { normalized.contains(it) }
         }
 
@@ -280,6 +271,7 @@ class LaMovie :
 
         return languageSorted.sortedByDescending { it.matchesServer(preferredServer) }
     }
+
     private fun EmbedItem.matchesServer(preferredKey: String): Boolean {
         if (preferredKey == PREF_SERVER_DEFAULT) return false
         return serverKey() == preferredKey
@@ -309,8 +301,6 @@ class LaMovie :
     private fun Video.languageCode(): String = detectLanguage(videoTitle, videoUrl)
 
     private fun detectServer(vararg texts: String?): String {
-        if (texts.isEmpty()) return SERVER_KEY_UNKNOWN
-
         val combined = texts
             .asSequence()
             .filterNotNull()
@@ -324,8 +314,6 @@ class LaMovie :
     }
 
     private fun detectLanguage(vararg texts: String?): String {
-        if (texts.isEmpty()) return LANGUAGE_CODE_UNKNOWN
-
         val fingerprint = texts
             .asSequence()
             .filterNotNull()
@@ -406,11 +394,9 @@ class LaMovie :
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080p"
         private val PREF_QUALITY_ENTRIES = arrayOf("1080p", "720p", "480p", "360p")
-        private val PREF_QUALITY_VALUES = PREF_QUALITY_ENTRIES
 
         private const val BASE_PREF_LATEST_KEY = "preferred_latest_page"
-        private const val BASE_PREF_SUB_KEY = "preferred_subLang"
-        private const val PREF_LANGUAGE_KEY = BASE_PREF_SUB_KEY
+        private const val PREF_LANGUAGE_KEY = "preferred_subLang"
 
         private const val LANGUAGE_CODE_ANY = "any"
         private const val LANGUAGE_CODE_UNKNOWN = "unknown"
@@ -436,6 +422,14 @@ class LaMovie :
         )
 
         private val QUALITY_REGEX = Regex("""(\d+)p""")
+        private val QUALITY_KEYWORDS = mapOf(
+            2160 to listOf("2160", "4k", "uhd"),
+            1440 to listOf("1440", "2k", "qhd"),
+            1080 to listOf("1080", "fhd", "full hd"),
+            720 to listOf("720", "hd"),
+            480 to listOf("480", "sd"),
+            360 to listOf("360"),
+        )
 
         private const val SERVER_KEY_UNKNOWN = "unknown"
         private const val SERVER_KEY_DOOD = "dood"
@@ -528,13 +522,6 @@ class LaMovie :
                 preferences.edit().putString(key, normalized).apply()
             }
             value = normalized
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val mapped = normalizeListingType(newValue as String)
-                preferences.edit().putString(key, mapped).apply()
-                value = mapped
-                true
-            }
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
@@ -550,20 +537,13 @@ class LaMovie :
                 preferences.edit().putString(key, normalized).apply()
             }
             value = normalized
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val mapped = normalizeListingType(newValue as String)
-                preferences.edit().putString(key, mapped).apply()
-                value = mapped
-                true
-            }
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
             key = PREF_QUALITY_KEY
             title = "Calidad preferida"
             entries = PREF_QUALITY_ENTRIES
-            entryValues = PREF_QUALITY_VALUES
+            entryValues = PREF_QUALITY_ENTRIES
             summary = "%s"
 
             val stored = preferences.getString(key, PREF_QUALITY_DEFAULT) ?: PREF_QUALITY_DEFAULT
@@ -583,13 +563,6 @@ class LaMovie :
                 preferences.edit().putString(key, normalized).apply()
             }
             value = normalized
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val mapped = normalizeLanguagePreference(newValue as String)
-                preferences.edit().putString(key, mapped).apply()
-                value = mapped
-                true
-            }
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
