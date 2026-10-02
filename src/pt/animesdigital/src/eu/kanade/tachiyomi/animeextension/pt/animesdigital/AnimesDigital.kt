@@ -20,6 +20,7 @@ import keiyoushi.utils.parallelCatchingFlatMap
 import keiyoushi.utils.parallelCatchingFlatMapBlocking
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.useAsJsoup
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -43,11 +44,11 @@ class AnimesDigital :
 
     override val supportsLatest = true
 
-    override fun headersBuilder() = super.headersBuilder().add("Referer", baseUrl)
+    override fun headersBuilder() = super.headersBuilder().add("Referer", "$baseUrl/")
 
     private val preferences by getPreferencesLazy()
 
-    private val animesDigitalFilters by lazy { AnimesDigitalFilters(baseUrl, client) }
+    private val animesDigitalFilters by lazy { AnimesDigitalFilters(baseUrl, client, headers) }
 
     // ============================== Popular ===============================
     override suspend fun getPopularAnime(page: Int): AnimesPage {
@@ -55,7 +56,7 @@ class AnimesDigital :
         return super.getPopularAnime(page)
     }
 
-    override fun popularAnimeRequest(page: Int) = GET("$baseUrl/home")
+    override fun popularAnimeRequest(page: Int) = GET("$baseUrl/home", headers)
     override fun popularAnimeSelector() = latestUpdatesSelector()
     override fun popularAnimeFromElement(element: Element) = latestUpdatesFromElement(element)
     override fun popularAnimeNextPageSelector() = null
@@ -66,7 +67,7 @@ class AnimesDigital :
         return super.getLatestUpdates(page)
     }
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/lancamentos01/page/$page/")
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/lancamentos01/page/$page/", headers)
 
     override fun latestUpdatesSelector() = "div.b_flex > div.itemE > a"
 
@@ -97,7 +98,7 @@ class AnimesDigital :
 
         if (query.startsWith(PREFIX_SEARCH)) {
             val id = query.removePrefix(PREFIX_SEARCH)
-            return client.newCall(GET("$baseUrl/anime/a/$id"))
+            return client.newCall(GET("$baseUrl/anime/a/$id", headers))
                 .awaitSuccess()
                 .use(::searchAnimeByIdParse)
         }
@@ -115,7 +116,7 @@ class AnimesDigital :
     }
 
     private val searchToken by lazy {
-        client.newCall(GET("$baseUrl/animes-legendados-online001")).execute().useAsJsoup()
+        client.newCall(GET("$baseUrl/animes-legendados-online001", headers)).execute().useAsJsoup()
             .selectFirst("div.menu_filter_box")
             ?.attr("data-secury")
             ?.ifEmpty { null }
@@ -140,7 +141,7 @@ class AnimesDigital :
             }.build().encodedQuery.orEmpty()
 
             val genres = params.genres.joinToString { "\"$it\"" }
-            val delgenres = params.deleted_genres.joinToString { "\"$it\"" }
+            val delgenres = params.deletedGenres.joinToString { "\"$it\"" }
 
             add(
                 "filters",
@@ -160,15 +161,15 @@ class AnimesDigital :
         val animes = data.results.map(Jsoup::parseBodyFragment)
             .mapNotNull { it.selectFirst(searchAnimeSelector()) }
             .map(::searchAnimeFromElement)
-        val hasNext = data.total_page > data.page
+        val hasNext = data.totalPage > data.page
         AnimesPage(animes, hasNext)
     }.getOrElse { AnimesPage(emptyList(), false) }
 
     @Serializable
-    data class SearchResponseDto(
+    class SearchResponseDto(
         val results: List<String>,
         val page: Int,
-        val total_page: Int,
+        @SerialName("total_page") val totalPage: Int,
     )
 
     override fun searchAnimeNextPageSelector() = throw UnsupportedOperationException()
@@ -220,7 +221,6 @@ class AnimesDigital :
     override fun episodeFromElement(element: Element) = SEpisode.create().apply {
         setUrlWithoutDomain(element.attr("href"))
         name = element.selectFirst("div.title_anime")!!.text()
-        element.selectFirst("div.title_anime")!!.text()
         episode_number = name.substringAfterLast(" ").toFloatOrNull() ?: 1F
         date_upload = element.selectFirst("div.date")?.text()?.let { parseDate(it) } ?: 0L
     }
@@ -287,15 +287,13 @@ class AnimesDigital :
     }
 
     private fun getRealDoc(document: Document): Document = document.selectFirst("div.subitem > a:contains(menu)")?.let { link ->
-        client.newCall(GET(link.attr("href")))
+        client.newCall(GET(link.attr("href"), headers))
             .execute()
             .useAsJsoup()
     } ?: document
 
     private fun Element.getInfo(key: String): String? = selectFirst("div.info:has(span:containsOwn($key))")?.run {
-        ownText()
-            .trim()
-            .takeUnless { it.isBlank() || it == "?" }
+        ownText().takeUnless { it.isEmpty() || it == "?" }
     }
 
     private fun parseDate(date: String): Long {
@@ -303,7 +301,7 @@ class AnimesDigital :
             val normalized = date.lowercase(Locale.ROOT).trim()
 
             // Espera formatos como "2 semanas atrás", "1 dia atrás", etc.
-            val match = Regex("""(\d+)\s+(\S+)""").find(normalized) ?: return 0L
+            val match = RELATIVE_DATE_REGEX.find(normalized) ?: return 0L
 
             val amount = match.groupValues[1].toLongOrNull() ?: return 0L
             val unit = match.groupValues[2]
@@ -325,6 +323,8 @@ class AnimesDigital :
 
     companion object {
         const val PREFIX_SEARCH = "id:"
+
+        private val RELATIVE_DATE_REGEX = Regex("""(\d+)\s+(\S+)""")
 
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_TITLE = "Qualidade preferida"
