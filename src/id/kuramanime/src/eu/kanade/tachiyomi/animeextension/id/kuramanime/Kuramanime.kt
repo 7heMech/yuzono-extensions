@@ -243,6 +243,11 @@ class Kuramanime :
 
                     val hlsVideos = hlsUrl?.let {
                         runCatching {
+                            // extractFromHls returns the URL as a video for any body without variants, error pages included
+                            val masterHeaders = playlistUtils.generateMasterHeaders(headers, episodeUrl.toString())
+                            val playlist = client.newCall(GET(it, masterHeaders)).awaitSuccess().bodyString()
+                            if (!playlist.trimStart().startsWith("#EXTM3U")) return@runCatching emptyList<Video>()
+
                             playlistUtils.extractFromHls(
                                 playlistUrl = it,
                                 referer = episodeUrl.toString(),
