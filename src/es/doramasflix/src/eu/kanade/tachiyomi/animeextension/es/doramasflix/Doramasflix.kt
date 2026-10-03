@@ -153,11 +153,12 @@ class Doramasflix :
     // ============================== Server actions ==============================
 
     private suspend fun callAction(name: String, body: RequestBody): String {
-        var response = client.newCall(actionRequest(name, body)).await()
+        val actionId = actionIds.getValue(name)
+        var response = client.newCall(actionRequest(actionId, body)).await()
         if (response.code == 404) {
             response.close()
-            refreshActionIds()
-            response = client.newCall(actionRequest(name, body)).await()
+            refreshActionIds(name, actionId)
+            response = client.newCall(actionRequest(actionIds.getValue(name), body)).await()
         }
         return response.use {
             check(it.isSuccessful) { "HTTP ${it.code}" }
@@ -165,13 +166,15 @@ class Doramasflix :
         }
     }
 
-    private fun actionRequest(name: String, body: RequestBody) = POST(
+    private fun actionRequest(actionId: String, body: RequestBody) = POST(
         "$baseUrl/",
-        headers.newBuilder().set("Next-Action", actionIds.getValue(name)).build(),
+        headers.newBuilder().set("Next-Action", actionId).build(),
         body,
     )
 
-    private suspend fun refreshActionIds() = actionIdsMutex.withLock {
+    private suspend fun refreshActionIds(name: String, staleId: String) = actionIdsMutex.withLock {
+        if (actionIds[name] != staleId) return@withLock
+
         val html = client.newCall(GET(baseUrl, headers)).awaitSuccess().bodyString()
         val chunks = CHUNK_REGEX.findAll(html).map { it.value }.distinct().toList()
         val scripts = chunks.parallelCatchingMapNotNull { path ->
