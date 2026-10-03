@@ -39,7 +39,7 @@ class MeusAnimes : AnimeHttpSource() {
     override fun popularAnimeParse(response: Response): AnimesPage {
         val document = response.useAsJsoup()
         val animes = document.select("div#archive-content article.item").map(::animeFromElement)
-        val hasNextPage = document.selectFirst("div.pagination a.arrow_pag") != null
+        val hasNextPage = document.selectFirst("div.pagination a.arrow_pag > i.fa-caret-right") != null
         return AnimesPage(animes, hasNextPage)
     }
 
@@ -74,7 +74,7 @@ class MeusAnimes : AnimeHttpSource() {
                 thumbnail_url = element.selectFirst("div.thumbnail img")?.absUrl("src")
             }
         }
-        val hasNextPage = document.selectFirst("div.pagination a.arrow_pag") != null
+        val hasNextPage = document.selectFirst("div.pagination a.arrow_pag > i.fa-caret-right") != null
         return AnimesPage(animes, hasNextPage)
     }
 
