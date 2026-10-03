@@ -1,9 +1,12 @@
 package eu.kanade.tachiyomi.animeextension.pt.animeito
 
 import eu.kanade.tachiyomi.animeextension.pt.animeito.extractors.AnimeItoExtractor
+import eu.kanade.tachiyomi.animesource.model.Hoster
+import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.multisrc.animestream.AnimeStream
-import keiyoushi.utils.parallelCatchingFlatMapBlocking
+import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.awaitSuccess
 import keiyoushi.utils.useAsJsoup
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -21,14 +24,24 @@ class AnimeIto :
 
     override fun videoListSelector() = "ul.tabs_videos li"
 
-    override fun videoListParse(response: Response): List<Video> {
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> = client.newCall(GET(baseUrl + episode.url, headers))
+        .awaitSuccess()
+        .use(::hosterListParse)
+
+    override fun hosterListParse(response: Response): List<Hoster> {
         val episodeUrl = response.request.url.toString()
-        val items = response.useAsJsoup().select(videoListSelector())
-        return items.parallelCatchingFlatMapBlocking { element ->
-            val name = element.text()
-            val url = getHosterUrl(element)
-            getVideoList(url, name, episodeUrl)
+        return response.useAsJsoup().select(videoListSelector()).map { element ->
+            Hoster(
+                hosterUrl = episodeUrl,
+                hosterName = element.text(),
+                internalData = element.attr("value"),
+            )
         }
+    }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val url = getHosterUrl(hoster.internalData)
+        return getVideoList(url, hoster.hosterName, hoster.hosterUrl)
     }
 
     override suspend fun getHosterUrl(element: Element): String {
