@@ -67,7 +67,7 @@ class LaMovie :
     // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int): Request {
         val url = itemsUrlBuilder(page)
-            .addQueryParameter("kind", preferredListingType())
+            .addQueryParameter("kind", preferredListingType(BASE_PREF_LATEST_KEY))
             .addQueryParameter("sort", "recent")
             .build()
         return GET(url, headers)
@@ -487,8 +487,8 @@ class LaMovie :
         )
     }
 
-    private fun preferredListingType(): String {
-        val stored = preferences.getString(PREF_POPULAR_KEY, PREF_POPULAR_DEFAULT) ?: PREF_POPULAR_DEFAULT
+    private fun preferredListingType(key: String = PREF_POPULAR_KEY): String {
+        val stored = preferences.getString(key, PREF_POPULAR_DEFAULT) ?: PREF_POPULAR_DEFAULT
         return normalizeListingType(stored)
     }
 
