@@ -14,18 +14,20 @@ import eu.kanade.tachiyomi.animeextension.BuildConfig
 import eu.kanade.tachiyomi.animeextension.es.lamovie.extractors.LaMovieEmbedExtractor
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.multisrc.dopeflix.DopeFlix
 import eu.kanade.tachiyomi.network.GET
 import keiyoushi.network.get
-import keiyoushi.utils.parallelCatchingFlatMap
 import keiyoushi.utils.parallelFlatMap
 import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonString
 import keiyoushi.utils.tryParse
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import java.text.SimpleDateFormat
@@ -161,7 +163,7 @@ class LaMovie :
     }
 
     // ============================ Video Links =============================
-    override fun videoListRequest(episode: SEpisode): Request {
+    override fun hosterListRequest(episode: SEpisode): Request {
         val url = "$baseUrl${episode.url}".toHttpUrl()
         val (kind, id) = parseKindAndId(episode.url)
         val builder = apiUrlBuilder("playback", kind, id)
@@ -172,10 +174,10 @@ class LaMovie :
         return GET(builder.build(), headers)
     }
 
-    override fun videoListParse(response: Response): List<Video> = throw UnsupportedOperationException()
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
 
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
-        val embeds = client.get(videoListRequest(episode).url, headers, ensureSuccess = false).use { response ->
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
+        val embeds = client.get(hosterListRequest(episode).url, headers, ensureSuccess = false).use { response ->
             when {
                 response.code == 404 -> emptyList<EmbedItem>()
                 !response.isSuccessful -> throw Exception("HTTP ${response.code}")
@@ -184,20 +186,30 @@ class LaMovie :
         }
         if (embeds.isEmpty()) return emptyList()
 
-        val preferredLanguage = preferences.getString(PREF_LANGUAGE_KEY, PREF_LANGUAGE_DEFAULT)
-            ?.let(::normalizeLanguagePreference)
-            ?: PREF_LANGUAGE_DEFAULT
-        val preferredServer = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT) ?: PREF_SERVER_DEFAULT
-        val prioritizedEmbeds = if (preferredLanguage == PREF_LANGUAGE_DEFAULT && preferredServer == PREF_SERVER_DEFAULT) {
-            embeds
-        } else {
-            embeds.sortedWith(
-                compareByDescending<EmbedItem> { it.matchesLanguage(preferredLanguage) }
-                    .thenByDescending { it.matchesServer(preferredServer) },
+        return embeds.mapNotNull { embed ->
+            if (embed.serverKey() == SERVER_KEY_UNKNOWN) return@mapNotNull null
+            val url = embed.url.toHttpUrlOrNull() ?: return@mapNotNull null
+            Hoster(
+                hosterUrl = embed.url,
+                hosterName = listOfNotNull(embed.language, embed.server.ifBlank { url.host }, embed.quality)
+                    .joinToString(" - "),
+                internalData = embed.toJsonString(),
             )
         }
+    }
 
-        return prioritizedEmbeds.parallelCatchingFlatMap(::resolveEmbedVideos).sortVideos()
+    override suspend fun getVideoList(hoster: Hoster): List<Video> = resolveEmbedVideos(hoster.internalData.parseAs<EmbedItem>()).sortVideos()
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val language = preferences.getString(PREF_LANGUAGE_KEY, PREF_LANGUAGE_DEFAULT)
+            ?.let(::normalizeLanguagePreference) ?: PREF_LANGUAGE_DEFAULT
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT) ?: PREF_SERVER_DEFAULT
+        return map { it to it.internalData.parseAs<EmbedItem>() }
+            .sortedWith(
+                compareByDescending<Pair<Hoster, EmbedItem>> { (_, embed) -> embed.matchesLanguage(language) }
+                    .thenByDescending { (_, embed) -> embed.matchesServer(server) },
+            )
+            .map { it.first }
     }
 
     private suspend fun resolveEmbedVideos(embed: EmbedItem): List<Video> {

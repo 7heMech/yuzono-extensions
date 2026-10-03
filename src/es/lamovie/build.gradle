@@ -1,5 +1,6 @@
 ext {
     extName = 'LaMovie'
+    libVersion = '16'
     extClass = '.LaMovie'
     themePkg = 'dopeflix'
     baseUrl = 'https://lamovie.la'
