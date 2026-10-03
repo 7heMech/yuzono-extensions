@@ -1,4 +1,5 @@
 ext {
+    libVersion = 16
     extName = 'Anime Fire'
     extClass = '.AnimeFire'
     extVersionCode = 10

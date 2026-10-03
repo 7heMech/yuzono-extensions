@@ -7,13 +7,14 @@ import eu.kanade.tachiyomi.animeextension.pt.animefire.extractors.IframeExtracto
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.utils.ParsedAnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -22,7 +23,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class AnimeFire :
-    ParsedAnimeHttpLegacySource(),
+    ParsedAnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "Anime Fire"
@@ -152,18 +153,29 @@ class AnimeFire :
     }
 
     // ============================ Video Links =============================
-    override fun videoListParse(response: Response): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> {
         val document = response.asJsoup()
         val videoElement = document.selectFirst("video#my-video")
-        return if (videoElement != null) {
-            AnimeFireExtractor(client).videoListFromElement(videoElement, headers)
-        } else {
-            IframeExtractor(client).videoListFromDocument(document, headers)
-        }
+        val url = videoElement?.absUrl("data-video-src")
+            ?: document.selectFirst("div#div_video iframe")?.absUrl("src")
+        if (url.isNullOrBlank()) return emptyList()
+        return listOf(
+            Hoster(
+                hosterUrl = url,
+                hosterName = name,
+                internalData = if (videoElement != null) "json" else "iframe",
+            ),
+        )
     }
 
-    override fun videoListSelector() = throw UnsupportedOperationException()
-    override fun videoFromElement(element: Element) = throw UnsupportedOperationException()
+    override suspend fun getVideoList(hoster: Hoster): List<Video> = when (hoster.internalData) {
+        "json" -> AnimeFireExtractor(client).videosFromUrl(hoster.hosterUrl, headers)
+        "iframe" -> IframeExtractor(client).videosFromUrl(hoster.hosterUrl, headers)
+        else -> emptyList()
+    }
+
+    override fun seasonListSelector() = throw UnsupportedOperationException()
+    override fun seasonFromElement(element: Element) = throw UnsupportedOperationException()
 
     // ============================== Settings ==============================
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
