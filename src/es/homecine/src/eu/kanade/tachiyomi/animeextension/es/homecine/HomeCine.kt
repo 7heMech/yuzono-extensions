@@ -177,10 +177,11 @@ class HomeCine :
                 else -> ""
             }
 
-            val iframe = document.selectFirst("${tab.attr("href")} iframe") ?: return@parallelCatchingFlatMapBlocking emptyList<Video>()
-            var src = iframe.attr("src").ifEmpty { iframe.attr("data-src") }.replace("#038;", "&").replace("&amp;", "&")
+            val iframe = document.getElementById(tab.attr("href").removePrefix("#"))?.selectFirst("iframe")
+                ?: return@parallelCatchingFlatMapBlocking emptyList<Video>()
+            var src = iframe.absUrl("src").ifEmpty { iframe.absUrl("data-src") }.replace("#038;", "&").replace("&amp;", "&")
             if (src.contains("homecine")) {
-                src = client.newCall(GET(src, headers)).awaitSuccess().useAsJsoup().selectFirst("iframe")?.attr("src") ?: ""
+                src = client.newCall(GET(src, headers)).awaitSuccess().useAsJsoup().selectFirst("iframe")?.absUrl("src") ?: ""
             }
 
             when {
