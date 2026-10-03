@@ -7,14 +7,15 @@ import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
 import keiyoushi.network.get
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.addEditTextPreference
 import keiyoushi.utils.addListPreference
 import keiyoushi.utils.delegate
@@ -23,6 +24,9 @@ import keiyoushi.utils.parallelFlatMap
 import keiyoushi.utils.parallelMapNotNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
+import keiyoushi.utils.toJsonString
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.CacheControl
@@ -36,7 +40,7 @@ import java.util.Date
 import java.util.Locale
 
 class HexaWatch :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "HexaWatch"
@@ -354,13 +358,13 @@ class HexaWatch :
     }
 
     // ============================ Video Links =============================
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val requestUrl = videoRequestUrl(episode)
         val key = ByteArray(32).apply { SECURE_RANDOM.nextBytes(this) }
             .joinToString("") { "%02x".format(it) }
 
         val encryptedText = fetchEncryptedSources(requestUrl, key)
-        return videoListParseAsync(requestUrl, encryptedText, key)
+        return hosterListParseAsync(requestUrl, encryptedText, key)
     }
 
     private fun videoRequestUrl(episode: SEpisode): String {
@@ -398,8 +402,8 @@ class HexaWatch :
         throw Exception("The captcha token was rejected by the server")
     }
 
-    override fun videoListParse(response: Response): List<Video> = throw UnsupportedOperationException()
-    private suspend fun videoListParseAsync(requestUrl: String, encryptedText: String, key: String): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
+    private suspend fun hosterListParseAsync(requestUrl: String, encryptedText: String, key: String): List<Hoster> {
         val decryptionPayload = json.encodeToString(mapOf("text" to encryptedText, "key" to key))
         val requestBody = decryptionPayload.toJsonRequestBody()
 
@@ -409,28 +413,34 @@ class HexaWatch :
             decryptionResponse.parseAs<ExtractorResponseDto>()
         }
 
-        val subtitles = getSubtitles(requestUrl)
-
-        val videos = extractorData.result.sources.parallelFlatMap { source ->
-            runCatching {
-                playlistUtils.extractFromHls(
-                    playlistUrl = source.url,
-                    videoNameGen = { quality -> "Server: ${source.server} - $quality" },
-                    subtitleList = subtitles,
-                    referer = "$baseUrl/",
-                )
-            }.getOrElse {
-                emptyList()
-            }
+        return extractorData.result.sources.filter { it.url.isNotBlank() }.map { source ->
+            Hoster(
+                hosterName = "Server: ${source.server}",
+                hosterUrl = source.url,
+                internalData = HosterData(requestUrl, source.server).toJsonString(),
+            )
+        }.ifEmpty {
+            throw Exception("No servers found. Check extractor API response.")
         }
-
-        if (videos.isEmpty()) {
-            throw Exception("No videos found after extraction. Check extractor API response.")
-        }
-
-        val preferredQuality = preferences.videoQualityPref
-        return videos.sortedByDescending { preferredQuality.let(it.videoTitle::contains) }
     }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val data = hoster.internalData.parseAs<HosterData>()
+        val subtitles = getSubtitles(data.requestUrl)
+        return playlistUtils.extractFromHls(
+            playlistUrl = hoster.hosterUrl,
+            videoNameGen = { quality -> "Server: ${data.server} - $quality" },
+            subtitleList = subtitles,
+            referer = "$baseUrl/",
+        ).sortVideos()
+    }
+
+    override fun List<Video>.sortVideos(): List<Video> = sortedByDescending { it.videoTitle.contains(preferences.videoQualityPref) }
+
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
+
+    @Serializable
+    private class HosterData(val requestUrl: String, val server: String)
 
     private suspend fun getSubtitles(requestUrl: String): List<Track> {
         val match = GET_SUBTITLES_REGEX.find(requestUrl)
@@ -457,6 +467,8 @@ class HexaWatch :
                     Track(sub.url, langLabel)
                 }
                 .sortedByDescending { preferredSubLang.let(it.lang::startsWith) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             emptyList()
         }
