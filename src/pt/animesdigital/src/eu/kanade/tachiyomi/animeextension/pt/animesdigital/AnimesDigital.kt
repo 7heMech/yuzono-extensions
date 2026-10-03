@@ -8,13 +8,14 @@ import eu.kanade.tachiyomi.animeextension.pt.animesdigital.extractors.ScriptExtr
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.ParsedAnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parallelCatchingFlatMap
 import keiyoushi.utils.parallelCatchingFlatMapBlocking
@@ -33,7 +34,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class AnimesDigital :
-    ParsedAnimeHttpLegacySource(),
+    ParsedAnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "Animes Digital"
@@ -226,14 +227,31 @@ class AnimesDigital :
     }
 
     // ============================ Video Links =============================
-    override fun videoListParse(response: Response): List<Video> {
-        val player = response.useAsJsoup().selectFirst("div#player")!!
-        return player.select("div.tab-video").parallelCatchingFlatMapBlocking { div ->
-            div.select(videoListSelector()).parallelCatchingFlatMap { element ->
-                videosFromElement(element)
+    override fun hosterListParse(response: Response): List<Hoster> {
+        val document = response.useAsJsoup()
+        val player = document.selectFirst("div#player") ?: return emptyList()
+        return player.select("div.tab-video").flatMapIndexed { index, tab ->
+            val tabName = document.select("a[href]")
+                .firstOrNull { it.attr("href") == "#${tab.id()}" }?.text()
+                ?.takeIf(String::isNotBlank) ?: "Server ${index + 1}"
+            tab.select(videoSelector).map { element ->
+                Hoster(
+                    hosterUrl = document.location(),
+                    hosterName = tabName,
+                    internalData = element.outerHtml(),
+                )
             }
         }
     }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val element = Jsoup.parse(hoster.internalData, hoster.hosterUrl)
+            .selectFirst(videoSelector) ?: return emptyList()
+        return videosFromElement(element)
+    }
+
+    override fun seasonListSelector() = throw UnsupportedOperationException()
+    override fun seasonFromElement(element: Element) = throw UnsupportedOperationException()
 
     private val protectorExtractor by lazy { ProtectorExtractor(client) }
     private val bloggerExtractor by lazy { BloggerExtractor(client) }
@@ -246,7 +264,7 @@ class AnimesDigital :
                 else -> {
                     client.newCall(GET(url, headers)).awaitSuccess()
                         .useAsJsoup()
-                        .select(videoListSelector())
+                        .select(videoSelector)
                         .parallelCatchingFlatMap(::videosFromElement)
                 }
             }
@@ -262,9 +280,7 @@ class AnimesDigital :
     private val scriptSelectors = listOf("eval", "player.src", "this.src", "sources:")
         .joinToString { "script:containsData($it):not(:containsData(/bg.mp4))" }
 
-    override fun videoListSelector() = "iframe, $scriptSelectors"
-
-    override fun videoFromElement(element: Element): Video = throw UnsupportedOperationException()
+    private val videoSelector = "iframe, $scriptSelectors"
 
     // ============================== Settings ==============================
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
