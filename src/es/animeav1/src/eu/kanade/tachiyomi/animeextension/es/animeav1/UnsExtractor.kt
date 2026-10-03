@@ -43,11 +43,14 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
         val tiktokUrl = streams.hlsVideoTiktok?.takeIf(String::isNotBlank)?.let {
             resolve(origin, it) + tiktokVersion?.let { v -> "?v=$v" }.orEmpty()
         }
-        val cloudflareUrl = (streams.cfNative ?: streams.cf)?.takeIf(String::isNotBlank)?.let { resolve(origin, it) }
+        val cloudflarePath = streams.cf?.takeIf(String::isNotBlank) ?: streams.cfNative
+        val cloudflareUrl = cloudflarePath?.takeIf(String::isNotBlank)?.let { resolve(origin, it) }
+        val sourceUrl = streams.source?.takeIf(String::isNotBlank)?.let { resolve(origin, it) }
 
         return listOf(
             "Cloudflare" to cloudflareUrl,
             "Tiktok" to tiktokUrl,
+            "In-House" to sourceUrl,
         ).flatMap { (network, playlistUrl) ->
             if (playlistUrl == null) {
                 emptyList()
@@ -82,6 +85,7 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
         val hlsVideoTiktok: String? = null,
         val cf: String? = null,
         val cfNative: String? = null,
+        val source: String? = null,
         val streamingConfig: String? = null,
     )
 
