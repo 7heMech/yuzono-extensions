@@ -60,9 +60,12 @@ class SubDecryptor(private val client: OkHttpClient, private val headers: Header
         )
     }
 
-    private fun decrypt(encryptedB64: String): String = keyIvPairs.firstNotNullOfOrNull { (keyBytes, ivBytes) ->
-        CryptoAES.decrypt(encryptedB64, keyBytes, ivBytes).takeIf(String::isNotEmpty)
-    }.orEmpty()
+    private fun decrypt(encryptedB64: String): String {
+        if (encryptedB64.isBlank()) return ""
+        return keyIvPairs.firstNotNullOfOrNull { (keyBytes, ivBytes) ->
+            CryptoAES.decrypt(encryptedB64, keyBytes, ivBytes).takeIf(String::isNotEmpty)
+        } ?: throw IllegalStateException("Failed to decrypt subtitle line")
+    }
 
     private fun IntArray.toByteArray(): ByteArray = ByteArray(size * 4).also { bytes ->
         forEachIndexed { index, value ->
