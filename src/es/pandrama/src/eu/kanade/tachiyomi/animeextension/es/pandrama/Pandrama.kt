@@ -8,15 +8,15 @@ import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
-import keiyoushi.utils.parallelCatchingFlatMap
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.tryParse
 import okhttp3.Headers
@@ -28,7 +28,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 class Pandrama :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "Pandrama"
@@ -174,7 +174,7 @@ class Pandrama :
 
     override fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException()
 
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val (titleId, season, number) = EPISODE_URL_REGEX.find(episode.url)?.destructured
             ?: throw Exception("URL de episodio no válida")
         val servers = client.newCall(GET("$baseUrl/api/v1/titles/$titleId/seasons/$season/episodes/$number", apiHeaders))
@@ -183,7 +183,24 @@ class Pandrama :
             .episode
             .videos
 
-        return servers.parallelCatchingFlatMap { serverVideoResolver(it.src) }
+        return servers.mapNotNull { server ->
+            val url = server.src.lowercase()
+            val name = when {
+                url.contains("ok.ru") || url.contains("okru") -> "Okru"
+                url.contains("vk.com") || url.contains("vkvideo") -> "Vk"
+                else -> return@mapNotNull null
+            }
+            Hoster(hosterUrl = server.src, hosterName = name)
+        }
+    }
+
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> = serverVideoResolver(hoster.hosterUrl).sortVideos()
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
+        return sortedByDescending { it.hosterName.contains(server, true) }
     }
 
     private val okruExtractor by lazy { OkruExtractor(client) }
@@ -197,6 +214,8 @@ class Pandrama :
             else -> emptyList()
         }
     }
+
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
     override fun List<Video>.sortVideos(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
