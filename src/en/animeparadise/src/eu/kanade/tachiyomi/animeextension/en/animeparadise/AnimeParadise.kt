@@ -7,22 +7,24 @@ import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonString
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import java.util.concurrent.ConcurrentHashMap
 
 class AnimeParadise :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "AnimeParadise"
@@ -178,11 +180,13 @@ class AnimeParadise :
         .map { it.toSEpisode() }
         .reversed()
 
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
+
     // ============================ Video Links =============================
 
     override fun getEpisodeUrl(episode: SEpisode): String = baseUrl + episode.url
 
-    override fun videoListRequest(episode: SEpisode): Request {
+    override fun hosterListRequest(episode: SEpisode): Request {
         val watchUrl = (baseUrl + episode.url).toHttpUrl()
         val url = apiUrl.toHttpUrl().newBuilder()
             .addPathSegment("ep")
@@ -192,10 +196,20 @@ class AnimeParadise :
         return GET(url, apiHeaders)
     }
 
-    override fun videoListParse(response: Response): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> {
         val episode = response.parseAs<EpisodeDataResponse>().data.episode
         val streamLink = episode.streamLink ?: return emptyList()
+        val playlistUrl = "$streamUrl/m3u8".toHttpUrl().newBuilder()
+            .addQueryParameter("url", streamLink)
+            .build()
+            .toString()
+        return listOf(
+            Hoster(hosterUrl = playlistUrl, hosterName = "AnimeParadise", internalData = episode.toJsonString()),
+        )
+    }
 
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val episode = hoster.internalData.parseAs<StreamEpisode>()
         val subData = episode.subData.orEmpty()
         val subtitleList = subData.filter { it.type == "ass" || it.type == "vtt" }
             .groupBy { it.label }
@@ -206,18 +220,13 @@ class AnimeParadise :
                 Track(subUrl, it.label)
             }
 
-        val playlistUrl = "$streamUrl/m3u8".toHttpUrl().newBuilder()
-            .addQueryParameter("url", streamLink)
-            .build()
-            .toString()
-
         return playlistUtils.extractFromHls(
-            playlistUrl = playlistUrl,
+            playlistUrl = hoster.hosterUrl,
             referer = "$baseUrl/",
             masterHeaders = streamHeaders,
             videoHeaders = streamHeaders,
             subtitleList = subtitleList,
-        )
+        ).sortVideos()
     }
 
     // ============================= Utilities ==============================
