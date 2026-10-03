@@ -8,11 +8,13 @@ import aniyomi.lib.vidhideextractor.VidHideExtractor
 import aniyomi.lib.vidoextractor.VidoExtractor
 import aniyomi.lib.voeextractor.VoeExtractor
 import aniyomi.lib.vudeoextractor.VudeoExtractor
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.multisrc.datalifeengine.DataLifeEngine
 import eu.kanade.tachiyomi.network.GET
-import keiyoushi.utils.parallelCatchingFlatMap
+import keiyoushi.utils.getPreferencesLazy
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -76,25 +78,41 @@ class Wiflix :
     }
 
     // ============================ Video Links =============================
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
-        val list = episode.url.split(",").filter { it.isNotBlank() }.parallelCatchingFlatMap {
-            with(it) {
-                when {
-                    contains("doods.pro") -> DoodExtractor(client).videosFromUrl(this)
-                    contains("vido.lol") -> VidoExtractor(client).videosFromUrl(this)
-                    contains("uqload.co") -> UqloadExtractor(client).videosFromUrl(this)
-                    contains("waaw1.tv") -> emptyList()
-                    contains("vudeo.co") -> VudeoExtractor(client).videosFromUrl(this)
-                    contains("streamvid.net") -> VidHideExtractor(client, headers).videosFromUrl(this)
-                    contains("upstream.to") -> UpstreamExtractor(client).videosFromUrl(this)
-                    contains("streamdav.com") -> StreamDavExtractor(client).videosFromUrl(this)
-                    contains("voe.sx") -> VoeExtractor(client, headers).videosFromUrl(this)
-                    else -> emptyList()
-                }
-            }
+    private val hosterPreferences by getPreferencesLazy()
+
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> = episode.url.split(",").mapNotNull { url ->
+        val host = url.toHttpUrlOrNull()?.host ?: return@mapNotNull null
+        val serverName = when {
+            "doods.pro" in host -> "Doodstream"
+            "vido.lol" in host -> "Vido"
+            "uqload.co" in host -> "Uqload"
+            "vudeo.co" in host -> "Vudeo"
+            "streamvid.net" in host -> "StreamVid"
+            "upstream.to" in host -> "Upstream"
+            "streamdav.com" in host -> "StreamDav"
+            "voe.sx" in host -> "Voe"
+            else -> return@mapNotNull null
         }
-        if (list.isEmpty()) throw Exception("no player found")
-        return list
+        Hoster(hosterUrl = url, hosterName = serverName)
+    }
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val server = hosterPreferences.getString("preferred_server", "Upstream")!!
+        return sortedByDescending { it.hosterName.contains(server, true) }
+    }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> = with(hoster.hosterUrl) {
+        when (hoster.hosterName) {
+            "Doodstream" -> DoodExtractor(client).videosFromUrl(this)
+            "Vido" -> VidoExtractor(client).videosFromUrl(this)
+            "Uqload" -> UqloadExtractor(client).videosFromUrl(this)
+            "Vudeo" -> VudeoExtractor(client).videosFromUrl(this)
+            "StreamVid" -> VidHideExtractor(client, headers).videosFromUrl(this)
+            "Upstream" -> UpstreamExtractor(client).videosFromUrl(this)
+            "StreamDav" -> StreamDavExtractor(client).videosFromUrl(this)
+            "Voe" -> VoeExtractor(client, headers).videosFromUrl(this)
+            else -> emptyList()
+        }
     }
 
     override fun videoFromElement(element: Element): Video = throw UnsupportedOperationException()
