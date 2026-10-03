@@ -14,22 +14,23 @@ import aniyomi.lib.youruploadextractor.YourUploadExtractor
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
-import keiyoushi.utils.parallelCatchingFlatMapBlocking
 import keiyoushi.utils.useAsJsoup
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
 
 class HomeCine :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "HomeCine"
@@ -166,9 +167,9 @@ class HomeCine :
         }.reversed()
     }
 
-    override fun videoListParse(response: Response): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> {
         val document = response.useAsJsoup()
-        return document.select(".player_nav a[href^=#tab]").parallelCatchingFlatMapBlocking { tab ->
+        return document.select(".player_nav a[href^=#tab]").mapNotNull { tab ->
             val lang = tab.text().lowercase()
             val prefix = when {
                 lang.contains("latino") -> "[LAT]"
@@ -176,55 +177,77 @@ class HomeCine :
                 lang.contains("sub") || lang.contains("vose") -> "[SUB]"
                 else -> ""
             }
-
             val iframe = document.getElementById(tab.attr("href").removePrefix("#"))?.selectFirst("iframe")
-                ?: return@parallelCatchingFlatMapBlocking emptyList<Video>()
-            var src = iframe.absUrl("src").ifEmpty { iframe.absUrl("data-src") }.replace("#038;", "&").replace("&amp;", "&")
-            if (src.contains("homecine")) {
-                src = client.newCall(GET(src, headers)).awaitSuccess().useAsJsoup().selectFirst("iframe")?.absUrl("src") ?: ""
-            }
-
-            when {
-                src.contains("fastream") -> {
-                    if (src.contains("emb.html")) {
-                        val key = src.split("/").last()
-                        src = "https://fastream.to/embed-$key.html"
-                    }
-                    FastreamExtractor(client, headers).videosFromUrl(src, needsSleep = false, prefix = "$prefix Fastream:")
-                }
-
-                src.contains("upstream") -> {
-                    UpstreamExtractor(client).videosFromUrl(src, prefix = "$prefix ")
-                }
-
-                src.contains("yourupload") -> {
-                    YourUploadExtractor(client).videoFromUrl(src, headers, prefix = "$prefix ")
-                }
-
-                src.contains("voe") -> {
-                    VoeExtractor(client, headers).videosFromUrl(src, prefix = "$prefix ")
-                }
-
-                src.contains("wish") -> {
-                    StreamWishExtractor(client, headers).videosFromUrl(src) { "$prefix StreamWish:$it" }
-                }
-
-                src.contains("mp4upload") -> {
-                    Mp4uploadExtractor(client).videosFromUrl(src, headers, prefix = "$prefix ")
-                }
-
-                src.contains("burst") -> {
-                    BurstCloudExtractor(client).videoFromUrl(src, headers = headers, prefix = "$prefix ")
-                }
-
-                src.contains("filemoon") || src.contains("moonplayer") -> {
-                    FilemoonExtractor(client).videosFromUrl(src, headers = headers, prefix = "$prefix Filemoon:")
-                }
-
-                else -> emptyList()
-            }
+                ?: return@mapNotNull null
+            val src = iframe.absUrl("src").ifEmpty { iframe.absUrl("data-src") }
+                .replace("#038;", "&").replace("&amp;", "&")
+            val url = src.toHttpUrlOrNull() ?: return@mapNotNull null
+            Hoster(
+                hosterUrl = src,
+                hosterName = "$prefix ${tab.text()} - ${url.host}",
+                internalData = prefix,
+            )
         }
     }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val prefix = hoster.internalData
+        var src = hoster.hosterUrl
+        if (src.contains("homecine")) {
+            src = client.newCall(GET(src, headers)).awaitSuccess().useAsJsoup()
+                .selectFirst("iframe")?.absUrl("src").orEmpty()
+        }
+        return when {
+            src.contains("fastream") -> {
+                if (src.contains("emb.html")) {
+                    val key = src.split("/").last()
+                    src = "https://fastream.to/embed-$key.html"
+                }
+                FastreamExtractor(client, headers).videosFromUrl(src, needsSleep = false, prefix = "$prefix Fastream:")
+            }
+
+            src.contains("upstream") -> {
+                UpstreamExtractor(client).videosFromUrl(src, prefix = "$prefix ")
+            }
+
+            src.contains("yourupload") -> {
+                YourUploadExtractor(client).videoFromUrl(src, headers, prefix = "$prefix ")
+            }
+
+            src.contains("voe") -> {
+                VoeExtractor(client, headers).videosFromUrl(src, prefix = "$prefix ")
+            }
+
+            src.contains("wish") -> {
+                StreamWishExtractor(client, headers).videosFromUrl(src) { "$prefix StreamWish:$it" }
+            }
+
+            src.contains("mp4upload") -> {
+                Mp4uploadExtractor(client).videosFromUrl(src, headers, prefix = "$prefix ")
+            }
+
+            src.contains("burst") -> {
+                BurstCloudExtractor(client).videoFromUrl(src, headers = headers, prefix = "$prefix ")
+            }
+
+            src.contains("filemoon") || src.contains("moonplayer") -> {
+                FilemoonExtractor(client).videosFromUrl(src, headers = headers, prefix = "$prefix Filemoon:")
+            }
+
+            else -> emptyList()
+        }.sortVideos()
+    }
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val language = preferences.getString(PREF_LANGUAGE_KEY, PREF_LANGUAGE_DEFAULT)!!
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
+        return sortedWith(
+            compareByDescending<Hoster> { it.hosterName.contains(language) }
+                .thenByDescending { it.hosterName.contains(server, true) },
+        )
+    }
+
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
     override fun List<Video>.sortVideos(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
