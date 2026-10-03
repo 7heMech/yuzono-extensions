@@ -23,35 +23,38 @@ import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.bodyString
 import keiyoushi.utils.extractNextJs
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
-import keiyoushi.utils.parallelCatchingFlatMap
 import keiyoushi.utils.parallelCatchingMapNotNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
+import keiyoushi.utils.toJsonString
 import keiyoushi.utils.useAsJsoup
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.RequestBody
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import java.util.concurrent.ConcurrentHashMap
 
 class Doramasflix :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "Doramasflix"
@@ -306,7 +309,7 @@ class Doramasflix :
 
     // ============================== Videos ==============================
 
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val pageUrl = (baseUrl + episode.url).toHttpUrl()
         val links = if (pageUrl.pathSegments.firstOrNull() == MOVIE_PATH) {
             val body = listOf(MovieLinksRequest(fetchMovieId(pageUrl))).toJsonRequestBody()
@@ -317,14 +320,37 @@ class Doramasflix :
             callAction(ACTION_EPISODE_LINKS, body).parseFlight<List<LinkDto>?>()
         }
 
-        return links.orEmpty().parallelCatchingFlatMap { link ->
-            serverVideoResolver(
-                url = link.link.decodeEmbedLink(),
-                prefix = link.lang?.getLang().orEmpty(),
-                server = SERVERS[link.server],
+        return links.orEmpty().mapNotNull { link ->
+            val url = link.link.decodeEmbedLink().toHttpUrlOrNull() ?: return@mapNotNull null
+            val prefix = link.lang?.getLang().orEmpty()
+            val server = SERVERS[link.server]
+            if (server == "mega" || server == "primeload") return@mapNotNull null
+            Hoster(
+                hosterUrl = url.toString(),
+                hosterName = "$prefix ${server ?: url.host}",
+                internalData = HosterData(prefix, server).toJsonString(),
             )
         }
     }
+
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val data = hoster.internalData.parseAs<HosterData>()
+        return serverVideoResolver(hoster.hosterUrl, data.prefix, data.server).sortVideos()
+    }
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val language = preferences.getString(PREF_LANGUAGE_KEY, PREF_LANGUAGE_DEFAULT)!!
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
+        return sortedWith(
+            compareByDescending<Hoster> { it.hosterName.contains(language) }
+                .thenByDescending { it.hosterName.contains(server, true) },
+        )
+    }
+
+    @Serializable
+    private class HosterData(val prefix: String, val server: String?)
 
     private suspend fun fetchMovieId(url: HttpUrl): String {
         val document = client.newCall(GET(url, headers)).awaitSuccess().useAsJsoup()
@@ -447,6 +473,8 @@ class Doramasflix :
     }
 
     // ============================== Settings ==============================
+
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
     override fun List<Video>.sortVideos(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
