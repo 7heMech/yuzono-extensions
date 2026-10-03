@@ -11,17 +11,21 @@ import aniyomi.lib.vidguardextractor.VidGuardExtractor
 import app.cash.quickjs.QuickJs
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.ParsedAnimeHttpLegacySource
 import keiyoushi.utils.bodyString
 import keiyoushi.utils.getPreferencesLazy
-import keiyoushi.utils.parallelCatchingFlatMapBlocking
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonString
 import keiyoushi.utils.useAsJsoup
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.Serializable
 import okhttp3.FormBody
 import okhttp3.Response
 import org.jsoup.Jsoup
@@ -29,7 +33,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class Kuramanime :
-    ParsedAnimeHttpLegacySource(),
+    ParsedAnimeHttpSource(),
     ConfigurableAnimeSource {
     override val name = "Kuramanime"
 
@@ -151,7 +155,9 @@ class Kuramanime :
     }
 
     // ============================ Video Links =============================
-    override fun videoListSelector() = "video#player > source"
+    override fun seasonListSelector(): String = throw UnsupportedOperationException()
+
+    override fun seasonFromElement(element: Element): SAnime = throw UnsupportedOperationException()
 
     // Shall we add "archive", "archive-v2"? archive.org usually returns a beautiful 403 xD
     private val supportedHosters = listOf("kuramadrive", "kuramadrive-v2", "filelions", "filemoon", "mega", "streamwish", "streamtape", "vidguard", "doodstream")
@@ -163,9 +169,30 @@ class Kuramanime :
     private val doodExtractor by lazy { DoodExtractor(client) }
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
 
-    override fun videoListParse(response: Response): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> {
         val doc = response.useAsJsoup()
+        return doc.select("select#changeServer > option")
+            .filter { it.attr("value") in supportedHosters }
+            .map {
+                val server = it.attr("value")
+                val name = it.text().substringBefore(" (")
+                Hoster(
+                    hosterUrl = doc.location(),
+                    hosterName = name,
+                    internalData = HosterData(server).toJsonString(),
+                )
+            }
+    }
+
+    @Serializable
+    private class HosterData(val server: String)
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val server = hoster.internalData.parseAs<HosterData>().server
+        val serverName = hoster.hosterName
+        val response = client.newCall(GET(hoster.hosterUrl, headers)).awaitSuccess()
         val episodeUrl = response.request.url
+        val doc = response.useAsJsoup()
         val origin = "${episodeUrl.scheme}://${episodeUrl.host}"
 
         val scriptData = getScriptData(doc, origin) ?: return emptyList()
@@ -177,12 +204,8 @@ class Kuramanime :
         val authorization = doc.selectFirst("#tokenAuthJs")?.attr("value")
             ?.takeUnless(String::isEmpty)
             ?.let { episodeUrl.resolve(it)?.toString() }
-            ?.let(::getAuthorization)
+            ?.let { getAuthorization(it) }
             ?: return emptyList()
-
-        val servers = doc.select("select#changeServer > option")
-            .map { it.attr("value") to it.text().substringBefore(" (") }
-            .filter { supportedHosters.contains(it.first) }
 
         val headers = headersBuilder()
             .set("Referer", episodeUrl.toString())
@@ -195,87 +218,85 @@ class Kuramanime :
             ?.let { episodeUrl.resolve(it) }
             ?.let { checkUrl ->
                 runCatching {
-                    client.newCall(GET(checkUrl, headers)).execute()
+                    client.newCall(GET(checkUrl, headers)).awaitSuccess()
                         .bodyString()
                         .trim('"', ' ', '\n')
-                }.getOrNull()
+                }.onFailure { if (it is CancellationException) throw it }.getOrNull()
             }
             ?.takeUnless(String::isEmpty)
             ?: "1"
 
-        return servers.parallelCatchingFlatMapBlocking { (server, serverName) ->
-            val authHeaders = headers.newBuilder()
-                .set("X-Fuck-ID", scriptData.tokenId)
-                .set("X-Request-ID", getRandomString())
-                .set("X-Request-Index", "0")
-                .build()
+        val authHeaders = headers.newBuilder()
+            .set("X-Fuck-ID", scriptData.tokenId)
+            .set("X-Request-ID", getRandomString())
+            .set("X-Request-Index", "0")
+            .build()
 
-            val hash = client.newCall(GET("$origin/" + scriptData.authPath, authHeaders))
-                .awaitSuccess()
-                .bodyString()
-                .trim('"')
+        val hash = client.newCall(GET("$origin/" + scriptData.authPath, authHeaders))
+            .awaitSuccess()
+            .bodyString()
+            .trim('"')
 
-            val newUrl = episodeUrl.newBuilder()
-                .addQueryParameter(scriptData.tokenParam, hash)
-                .addQueryParameter(scriptData.serverParam, server)
-                .addQueryParameter("page", page)
-                .build()
+        val newUrl = episodeUrl.newBuilder()
+            .addQueryParameter(scriptData.tokenParam, hash)
+            .addQueryParameter(scriptData.serverParam, server)
+            .addQueryParameter("page", page)
+            .build()
 
-            val body = FormBody.Builder()
-                .add("authorization", authorization)
-                .build()
+        val body = FormBody.Builder()
+            .add("authorization", authorization)
+            .build()
 
-            val playerDoc = client.newCall(POST(newUrl.toString(), headers, body))
-                .awaitSuccess()
-                .useAsJsoup()
+        val playerDoc = client.newCall(POST(newUrl.toString(), headers, body))
+            .awaitSuccess()
+            .useAsJsoup()
 
-            val url = playerDoc.selectFirst("div.video-content iframe, iframe")?.attr("abs:src")
-            when (server) {
-                "filelions" if url != null -> streamWishExtractor.videosFromUrl(url)
-                "filemoon" if url != null -> filemoonExtractor.videosFromUrl(url)
-                "streamwish" if url != null -> streamWishExtractor.videosFromUrl(url)
-                "streamtape" if url != null -> streamtapeExtractor.videosFromUrl(url)
-                "vidguard" if url != null -> vidguardExtractor.videosFromUrl(url)
-                "doodstream" if url != null -> doodExtractor.videosFromUrl(url, serverName)
-                else -> {
-                    val hlsUrl = playerDoc.selectFirst("video#player")?.attr("abs:data-hls-src")
-                        ?.takeUnless(String::isEmpty)
+        val url = playerDoc.selectFirst("div.video-content iframe, iframe")?.attr("abs:src")
+        return when (server) {
+            "filelions" if url != null -> streamWishExtractor.videosFromUrl(url)
+            "filemoon" if url != null -> filemoonExtractor.videosFromUrl(url)
+            "streamwish" if url != null -> streamWishExtractor.videosFromUrl(url)
+            "streamtape" if url != null -> streamtapeExtractor.videosFromUrl(url)
+            "vidguard" if url != null -> vidguardExtractor.videosFromUrl(url)
+            "doodstream" if url != null -> doodExtractor.videosFromUrl(url, serverName)
+            else -> {
+                val hlsUrl = playerDoc.selectFirst("video#player")?.attr("abs:data-hls-src")
+                    ?.takeUnless(String::isEmpty)
 
-                    val hlsVideos = hlsUrl?.let {
-                        runCatching {
-                            // extractFromHls returns the URL as a video for any body without variants, error pages included
-                            val masterHeaders = playlistUtils.generateMasterHeaders(headers, episodeUrl.toString())
-                            val playlist = client.newCall(GET(it, masterHeaders)).awaitSuccess().bodyString()
-                            if (!playlist.trimStart().startsWith("#EXTM3U")) return@runCatching emptyList<Video>()
+                val hlsVideos = hlsUrl?.let {
+                    runCatching {
+                        // extractFromHls returns the URL as a video for any body without variants, error pages included
+                        val masterHeaders = playlistUtils.generateMasterHeaders(headers, episodeUrl.toString())
+                        val playlist = client.newCall(GET(it, masterHeaders)).awaitSuccess().bodyString()
+                        if (!playlist.trimStart().startsWith("#EXTM3U")) return@runCatching emptyList<Video>()
 
-                            playlistUtils.extractFromHls(
-                                playlistUrl = it,
-                                referer = episodeUrl.toString(),
-                                videoNameGen = { quality -> "$quality - $serverName" },
-                            )
-                        }.getOrNull()
-                    }.orEmpty()
+                        playlistUtils.extractFromHls(
+                            playlistUrl = it,
+                            referer = episodeUrl.toString(),
+                            videoNameGen = { quality -> "$quality - $serverName" },
+                        )
+                    }.onFailure { if (it is CancellationException) throw it }.getOrNull()
+                }.orEmpty()
 
-                    hlsVideos.ifEmpty {
-                        playerDoc.select("video#player > source").map {
-                            val src = it.attr("abs:src")
-                            Video(src, "${it.attr("size")}p - $serverName", src)
-                        }
+                hlsVideos.ifEmpty {
+                    playerDoc.select("video#player > source").map {
+                        val src = it.attr("abs:src")
+                        Video(src, "${it.attr("size")}p - $serverName", src)
                     }
                 }
             }
-        }
+        }.sortVideos()
     }
 
-    private fun getScriptData(doc: Document, origin: String): ScriptDataDto? {
+    private suspend fun getScriptData(doc: Document, origin: String): ScriptDataDto? {
         // The attribute holding the script name (data-kk, previously data-kps) is declared in sizzlyb.js
         val attrName = doc.selectFirst("script[src*=sizzlyb]")?.attr("abs:src")
             ?.takeUnless(String::isEmpty)
             ?.let { src ->
                 runCatching {
-                    val script = client.newCall(GET(src, headers)).execute().bodyString()
+                    val script = client.newCall(GET(src, headers)).awaitSuccess().bodyString()
                     routeAttrRegex.find(script)?.groupValues?.get(1)
-                }.getOrNull()
+                }.onFailure { if (it is CancellationException) throw it }.getOrNull()
             }
 
         val scriptName = listOfNotNull(attrName, "data-kk", "data-kps").distinct()
@@ -284,7 +305,7 @@ class Kuramanime :
             ?: return null
 
         return runCatching {
-            val script = client.newCall(GET("$origin/assets/js/$scriptName.js", headers)).execute()
+            val script = client.newCall(GET("$origin/assets/js/$scriptName.js", headers)).awaitSuccess()
                 .bodyString()
 
             val envVars = envVarRegex.findAll(script).associate { it.groupValues[1] to it.groupValues[2] }
@@ -297,17 +318,17 @@ class Kuramanime :
                 tokenParam = envVars["MIX_PAGE_TOKEN_KEY"] ?: "",
                 serverParam = envVars["MIX_STREAM_SERVER_KEY"] ?: "",
             )
-        }.getOrNull()
+        }.onFailure { if (it is CancellationException) throw it }.getOrNull()
     }
 
     // The obfuscated script hands a constant token to jQuery's `.load()`, run it against a stubbed `$` to read it.
-    private fun getAuthorization(scriptUrl: String): String? = runCatching {
-        val script = client.newCall(GET(scriptUrl, headers)).execute().bodyString()
+    private suspend fun getAuthorization(scriptUrl: String): String? = runCatching {
+        val script = client.newCall(GET(scriptUrl, headers)).awaitSuccess().bodyString()
 
         QuickJs.create().use { qjs ->
             qjs.evaluate(AUTH_JS_PREFIX + script + AUTH_JS_SUFFIX) as? String
         }
-    }.getOrNull()?.takeUnless(String::isEmpty)
+    }.onFailure { if (it is CancellationException) throw it }.getOrNull()?.takeUnless(String::isEmpty)
 
     private class ScriptDataDto(
         authPathPrefix: String,
@@ -335,8 +356,6 @@ class Kuramanime :
             compareBy { it.videoTitle.contains(quality) },
         ).reversed()
     }
-
-    override fun videoFromElement(element: Element) = throw UnsupportedOperationException()
 
     // ============================== Settings ==============================
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
