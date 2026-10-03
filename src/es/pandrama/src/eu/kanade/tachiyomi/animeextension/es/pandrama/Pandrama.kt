@@ -124,19 +124,44 @@ class Pandrama :
 
     override fun getAnimeUrl(anime: SAnime) = baseUrl + anime.url
 
+    override suspend fun getAnimeDetails(anime: SAnime): SAnime {
+        val resolved = resolveAnime(anime)
+        return super.getAnimeDetails(resolved).apply {
+            url = resolved.url
+            title = resolved.title
+        }
+    }
+
+    private suspend fun resolveAnime(anime: SAnime): SAnime {
+        if (anime.url.titleIdOrNull() != null) return anime
+
+        val title = anime.title.trim().removePrefix("🇲🇽").removePrefix("🇪🇸").trim()
+        require(title.isNotBlank()) { "No se pudo migrar un drama sin título" }
+        val result = client.newCall(channelRequest(1, query = title))
+            .awaitSuccess()
+            .parseAs<ChannelResponse>()
+        return result.pagination.data.map { it.toSAnime() }
+            .filter { it.title.equals(title, ignoreCase = true) }
+            .distinctBy { it.url }
+            .singleOrNull()
+            ?: throw Exception("No se pudo migrar este drama. Búscalo de nuevo en Pandrama para actualizar su enlace.")
+    }
+
     override fun animeDetailsParse(response: Response): SAnime {
         val result = response.parseAs<TitleResponse>()
         return result.title.toSAnime(result.credits)
     }
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
-        val titleId = anime.url.titleId()
+        val resolved = resolveAnime(anime)
+        val titleId = resolved.url.titleId()
         val seasons = client.newCall(GET("$baseUrl/api/v1/titles/$titleId", apiHeaders))
             .awaitSuccess()
             .parseAs<TitleResponse>()
             .availableSeasons
             .sorted()
         val multipleSeasons = seasons.size > 1
+        val episodeDateFormat = dateFormat
 
         return seasons
             .flatMap { fetchSeasonEpisodes(titleId, it) }
@@ -148,8 +173,8 @@ class Pandrama :
                         "Episodio ${episode.episodeNumber}"
                     }
                     episode_number = episode.episodeNumber.toFloat()
-                    date_upload = dateFormat.tryParse(episode.releaseDate?.take(DATE_LENGTH))
-                    url = "${anime.url}/season/${episode.seasonNumber}/episode/${episode.episodeNumber}"
+                    date_upload = episodeDateFormat.tryParse(episode.releaseDate?.take(DATE_LENGTH))
+                    url = "${resolved.url}/season/${episode.seasonNumber}/episode/${episode.episodeNumber}"
                 }
             }
             .reversed()
@@ -253,11 +278,18 @@ class Pandrama :
         fun toUriPart() = vals[state].second
     }
 
-    private fun String.titleId() = substringAfter("/titles/").substringBefore("/")
-
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
+    private fun String.titleIdOrNull(): String? {
+        val segments = baseUrl.toHttpUrl().resolve(this)?.pathSegments ?: return null
+        return segments.takeIf { it.size > 1 && it[0] == "titles" }
+            ?.get(1)?.takeIf { (it.toIntOrNull() ?: 0) > 0 }
     }
+
+    private fun String.titleId() = titleIdOrNull() ?: throw Exception("URL de drama no válida")
+
+    private val dateFormat: SimpleDateFormat
+        get() = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
 
     companion object {
         private const val PREF_QUALITY_KEY = "preferred_quality"
