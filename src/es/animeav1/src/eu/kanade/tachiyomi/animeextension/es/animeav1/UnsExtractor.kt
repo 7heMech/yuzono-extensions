@@ -41,7 +41,10 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
 
         val tiktokVersion = streams.streamingConfig?.let { TIKTOK_VERSION_REGEX.find(it)?.groupValues?.get(1) }
         val tiktokUrl = streams.hlsVideoTiktok?.takeIf(String::isNotBlank)?.let {
-            resolve(origin, it) + tiktokVersion?.let { v -> "?v=$v" }.orEmpty()
+            val url = resolve(origin, it)
+            tiktokVersion?.let { version ->
+                url.toHttpUrl().newBuilder().addQueryParameter("v", version).build().toString()
+            } ?: url
         }
         val cloudflarePath = streams.cf?.takeIf(String::isNotBlank) ?: streams.cfNative
         val cloudflareUrl = cloudflarePath?.takeIf(String::isNotBlank)?.let { resolve(origin, it) }
