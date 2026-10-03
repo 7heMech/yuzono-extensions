@@ -122,6 +122,8 @@ class Pandrama :
 
     override fun animeDetailsRequest(anime: SAnime) = GET("$baseUrl/api/v1/titles/${anime.url.titleId()}", apiHeaders)
 
+    override fun getAnimeUrl(anime: SAnime) = baseUrl + anime.url
+
     override fun animeDetailsParse(response: Response): SAnime {
         val result = response.parseAs<TitleResponse>()
         return result.title.toSAnime(result.credits)
