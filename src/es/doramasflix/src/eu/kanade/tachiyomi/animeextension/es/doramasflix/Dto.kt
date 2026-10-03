@@ -16,6 +16,14 @@ class PaginationRequest(
 )
 
 @Serializable
+class MoviesRequest(
+    val limit: Int,
+    val sort: String,
+    val filter: FilterRequest,
+    val brandHost: String,
+)
+
+@Serializable
 class FilterRequest(
     val isTVShow: Boolean? = null,
 )

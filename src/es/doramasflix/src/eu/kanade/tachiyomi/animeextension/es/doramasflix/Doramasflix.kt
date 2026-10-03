@@ -40,6 +40,7 @@ import keiyoushi.utils.parallelCatchingMapNotNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
 import keiyoushi.utils.toJsonString
+import keiyoushi.utils.tryParse
 import keiyoushi.utils.useAsJsoup
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +52,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.RequestBody
 import okhttp3.Response
 import org.jsoup.nodes.Document
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 
 class Doramasflix :
@@ -225,10 +229,15 @@ class Doramasflix :
 
     private suspend fun fetchList(page: Int, sort: String, type: String): AnimesPage {
         if (type == GenreFilter.MOVIES) {
-            val request = PaginationRequest(page, PAGE_SIZE, sort, FilterRequest(), brandHost)
+            // getMovies only supports a limit, so fetch through this page plus one item.
+            val offset = (page - 1) * PAGE_SIZE
+            val request = MoviesRequest(offset + PAGE_SIZE + 1, sort, FilterRequest(), brandHost)
             val movies = callAction(ACTION_MOVIES, listOf(request).toJsonRequestBody())
                 .parseFlight<List<MediaDto>>()
-            return AnimesPage(movies.map { it.toSAnime(MOVIE_PATH) }, movies.size >= PAGE_SIZE)
+            return AnimesPage(
+                movies.drop(offset).take(PAGE_SIZE).map { it.toSAnime(MOVIE_PATH) },
+                movies.size > offset + PAGE_SIZE,
+            )
         }
 
         val request = PaginationRequest(page, PAGE_SIZE, sort, FilterRequest(type == GenreFilter.VARIETIES), brandHost)
@@ -287,6 +296,12 @@ class Doramasflix :
         val document = client.newCall(GET(baseUrl + anime.url, headers)).awaitSuccess().useAsJsoup()
         val series = document.extractNextJs<SeriesDto>() ?: return emptyList()
         val now = System.currentTimeMillis()
+        val dateFormats = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd").map {
+            SimpleDateFormat(it, Locale.ROOT).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+                isLenient = false
+            }
+        }
 
         return series.seasons.map { it.seasonNumber }.sortedDescending().flatMap { season ->
             val request = EpisodesRequest(series.serieId, season, 1, EPISODES_LIMIT, SORT_EPISODES, brandHost)
@@ -295,7 +310,9 @@ class Doramasflix :
                 .items
                 .map { episode ->
                     val number = episode.episodeNumber.toString().removeSuffix(".0")
-                    val airDate = episode.airDate?.toLongOrNull() ?: 0L
+                    val airDate = episode.airDate?.toLongOrNull()
+                        ?: dateFormats.firstNotNullOfOrNull { it.tryParse(episode.airDate).takeIf { date -> date != 0L } }
+                        ?: 0L
                     SEpisode.create().apply {
                         name = "T${episode.seasonNumber} - E$number - Capítulo $number"
                         episode_number = episode.episodeNumber
