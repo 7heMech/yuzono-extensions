@@ -22,7 +22,6 @@ import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
 import eu.kanade.tachiyomi.animesource.model.Hoster
-import eu.kanade.tachiyomi.animesource.model.Hoster.Companion.toHosterList
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Track
@@ -502,11 +501,21 @@ class Jellyfin(private val suffix: String) :
 
     // ============================ Video Links =============================
 
-    override suspend fun getHosterList(episode: SEpisode): List<Hoster> = getVideoList(episode).toHosterList()
-
-    private suspend fun getVideoList(episode: SEpisode): List<Video> {
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val item = client.get(episode.url).parseAs<ItemDto>(json)
-        val mediaSource = item.mediaSources?.firstOrNull() ?: return emptyList()
+        return item.mediaSources.orEmpty().filter { !it.id.isNullOrBlank() }.mapIndexed { index, source ->
+            Hoster(
+                hosterName = source.name?.takeIf(String::isNotBlank) ?: "Jellyfin (${index + 1})",
+                hosterUrl = episode.url,
+                internalData = source.id!!,
+            )
+        }
+    }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val item = client.get(hoster.hosterUrl).parseAs<ItemDto>(json)
+        val mediaSource = item.mediaSources?.firstOrNull { it.id == hoster.internalData }
+            ?: return emptyList()
         val itemId = item.id
 
         val videoList = mutableListOf<Video>()
@@ -589,6 +598,7 @@ class Jellyfin(private val suffix: String) :
             addPathSegment(itemId)
             addPathSegment("stream")
             addQueryParameter("static", "True")
+            addQueryParameter("MediaSourceId", mediaSource.id)
             addQueryParameter("PlaySessionId", sessionData.playSessionId)
         }.build().toString()
 
@@ -602,7 +612,7 @@ class Jellyfin(private val suffix: String) :
             initialized = true,
         )
 
-        val sessionMediaSource = sessionData.mediaSources.firstOrNull()
+        val sessionMediaSource = sessionData.mediaSources.firstOrNull { it.id == mediaSource.id }
             ?: return emptyList()
 
         if (sessionMediaSource.supportsDirectStream) {
