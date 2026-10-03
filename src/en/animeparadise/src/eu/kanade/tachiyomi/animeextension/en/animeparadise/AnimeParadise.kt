@@ -19,6 +19,7 @@ import keiyoushi.utils.parseAs
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
+import java.util.concurrent.ConcurrentHashMap
 
 class AnimeParadise :
     AnimeHttpLegacySource(),
@@ -62,6 +63,8 @@ class AnimeParadise :
 
     // =============================== Latest ===============================
 
+    private val seenLatest = ConcurrentHashMap.newKeySet<String>()
+
     override fun latestUpdatesRequest(page: Int): Request {
         val url = "$apiUrl/ep/recently-added".toHttpUrl().newBuilder()
             .addQueryParameter("limit", "25")
@@ -72,9 +75,12 @@ class AnimeParadise :
     }
 
     override fun latestUpdatesParse(response: Response): AnimesPage {
+        val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
+        if (page == 1) seenLatest.clear()
+
         val result = response.parseAs<RecentEpisodesResponse>()
         val animeList = result.data.map { it.origin }
-            .distinctBy { it.link }
+            .filter { seenLatest.add(it.link) }
             .map { it.toSAnime() }
         return AnimesPage(animeList, result.pagination.hasNext)
     }
@@ -191,8 +197,10 @@ class AnimeParadise :
         val streamLink = episode.streamLink ?: return emptyList()
 
         val subData = episode.subData.orEmpty()
-        val subtitleList = subData.filter { it.type == "ass" }
-            .ifEmpty { subData.filter { it.type == "vtt" } }
+        val subtitleList = subData.filter { it.type == "ass" || it.type == "vtt" }
+            .groupBy { it.label }
+            .values
+            .map { tracks -> tracks.firstOrNull { it.type == "ass" } ?: tracks.first() }
             .map {
                 val subUrl = if (it.src.startsWith("http")) it.src else "$apiUrl/stream/file/${it.src}"
                 Track(subUrl, it.label)
