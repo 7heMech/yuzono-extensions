@@ -192,6 +192,7 @@ class Kuramanime :
 
         val page = doc.selectFirst("#checkEp")?.attr("value")
             ?.takeUnless(String::isEmpty)
+            ?.let { episodeUrl.resolve(it) }
             ?.let { checkUrl ->
                 runCatching {
                     client.newCall(GET(checkUrl, headers)).execute()
@@ -240,13 +241,17 @@ class Kuramanime :
                     val hlsUrl = playerDoc.selectFirst("video#player")?.attr("abs:data-hls-src")
                         ?.takeUnless(String::isEmpty)
 
-                    if (hlsUrl != null) {
-                        playlistUtils.extractFromHls(
-                            playlistUrl = hlsUrl,
-                            referer = episodeUrl.toString(),
-                            videoNameGen = { "$it - $serverName" },
-                        )
-                    } else {
+                    val hlsVideos = hlsUrl?.let {
+                        runCatching {
+                            playlistUtils.extractFromHls(
+                                playlistUrl = it,
+                                referer = episodeUrl.toString(),
+                                videoNameGen = { quality -> "$quality - $serverName" },
+                            )
+                        }.getOrNull()
+                    }.orEmpty()
+
+                    hlsVideos.ifEmpty {
                         playerDoc.select("video#player > source").map {
                             val src = it.attr("abs:src")
                             Video(src, "${it.attr("size")}p - $serverName", src)
