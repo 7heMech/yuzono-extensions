@@ -3,12 +3,13 @@ package eu.kanade.tachiyomi.animeextension.pt.meusanimes
 import aniyomi.lib.bloggerextractor.BloggerExtractor
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.tryParse
 import keiyoushi.utils.useAsJsoup
@@ -21,7 +22,7 @@ import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-class MeusAnimes : AnimeHttpLegacySource() {
+class MeusAnimes : AnimeHttpSource() {
 
     override val name = "Meus Animes"
     override val baseUrl = "https://meusanimes.blog"
@@ -116,12 +117,19 @@ class MeusAnimes : AnimeHttpLegacySource() {
         }.reversed()
     }
 
-    // ============================== Video Links ===========================
-    override suspend fun getVideoList(episode: SEpisode): List<Video> {
-        val document = client.newCall(GET(baseUrl + episode.url, headers)).awaitSuccess().useAsJsoup()
-        val playerUrl = document.selectFirst("div.play-box-iframe iframe")?.absUrl("src")
-            ?: return emptyList()
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
+    // ============================== Video Links ===========================
+    override fun hosterListParse(response: Response): List<Hoster> {
+        val document = response.useAsJsoup()
+        val playerUrl = document.selectFirst("div.play-box-iframe iframe")?.absUrl("src")
+            ?.takeIf { it.contains("#/video/") }
+            ?: return emptyList()
+        return listOf(Hoster(hosterUrl = playerUrl, hosterName = "Meus Animes"))
+    }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val playerUrl = hoster.hosterUrl
         val (tmdb, season, number) = playerUrl.substringAfter("#/video/", "")
             .trim('/')
             .split('/')
@@ -144,7 +152,7 @@ class MeusAnimes : AnimeHttpLegacySource() {
             is JsonArray -> source.mapNotNull { runCatching { it.parseAs<VideoSource>() }.getOrNull() }
                 .map { Video(it.file, it.label, it.file, headers) }
             else -> emptyList()
-        }
+        }.sortVideos()
     }
 
     private suspend fun videosFromUrl(url: String): List<Video> = when {

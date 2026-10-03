@@ -1,4 +1,5 @@
 ext {
+    libVersion = 16
     extName = 'Meus Animes'
     extClass = '.MeusAnimes'
     extVersionCode = 2
