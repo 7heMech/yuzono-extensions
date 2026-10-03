@@ -15,21 +15,24 @@ import aniyomi.lib.youruploadextractor.YourUploadExtractor
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
-import keiyoushi.utils.AnimeHttpLegacySource
 import keiyoushi.utils.getPreferencesLazy
-import keiyoushi.utils.parallelCatchingFlatMapBlocking
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonString
 import keiyoushi.utils.useAsJsoup
+import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
 import java.util.Locale
 
 class AnimeAv1 :
-    AnimeHttpLegacySource(),
+    AnimeHttpSource(),
     ConfigurableAnimeSource {
 
     override val name = "AnimeAv1"
@@ -141,9 +144,11 @@ class AnimeAv1 :
         return episodes.reversed()
     }
 
+    override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
+
     override fun getFilterList(): AnimeFilterList = AnimeAv1Filters.FILTER_LIST
 
-    override fun videoListParse(response: Response): List<Video> {
+    override fun hosterListParse(response: Response): List<Hoster> {
         val doc = response.useAsJsoup()
         val script = doc.selectFirst("script:containsData(node_ids)")?.data() ?: return emptyList()
 
@@ -164,10 +169,34 @@ class AnimeAv1 :
         val dubServers = processMatches(DUB_REGEX, "DUB")
         val subServers = processMatches(SUB_REGEX, "SUB")
 
-        return (dubServers + subServers).parallelCatchingFlatMapBlocking { (url, server, type) ->
-            serverVideoResolver(url, type, server)
+        return (dubServers + subServers).map { (url, server, type) ->
+            val matched = findServer(url.toHttpUrlOrNull()?.host.orEmpty().lowercase(Locale.ROOT))
+                ?: findServer(server.lowercase(Locale.ROOT))
+            val name = when (matched) {
+                "uns" -> "UPNShare"
+                "player.zilla" -> "HLS"
+                else -> SERVER_LIST.firstOrNull { it.equals(matched, true) } ?: server
+            }
+            Hoster(hosterUrl = url, hosterName = "$type $name", internalData = HosterData(server, type).toJsonString())
         }
     }
+
+    override suspend fun getVideoList(hoster: Hoster): List<Video> {
+        val data = hoster.internalData.parseAs<HosterData>()
+        return serverVideoResolver(hoster.hosterUrl, data.language, data.server).sortVideos()
+    }
+
+    override fun List<Hoster>.sortHosters(): List<Hoster> {
+        val server = preferences.getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
+        val language = preferences.getString(PREF_LANG_KEY, PREF_LANG_DEFAULT)!!
+        return sortedWith(
+            compareByDescending<Hoster> { it.hosterName.contains(language, true) }
+                .thenByDescending { it.hosterName.contains(server, true) },
+        )
+    }
+
+    @Serializable
+    private class HosterData(val server: String, val language: String)
 
     /*--------------------------------Video extractors------------------------------------*/
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
