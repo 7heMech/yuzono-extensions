@@ -98,6 +98,7 @@ class MeusAnimes : AnimeHttpLegacySource() {
     override fun episodeListParse(response: Response): List<SEpisode> {
         val document = response.useAsJsoup()
         val multipleSeasons = document.select("div.se-c").size > 1
+        val dateFormat = SimpleDateFormat("MMM. dd, yyyy", Locale.ENGLISH)
 
         return document.select("ul.episodios li").map { element ->
             SEpisode.create().apply {
@@ -140,7 +141,7 @@ class MeusAnimes : AnimeHttpLegacySource() {
 
         return when (val source = result.videoUrl) {
             is JsonPrimitive -> videosFromUrl(source.content)
-            is JsonArray -> source.map { it.parseAs<VideoSource>() }
+            is JsonArray -> source.mapNotNull { runCatching { it.parseAs<VideoSource>() }.getOrNull() }
                 .map { Video(it.file, it.label, it.file, headers) }
             else -> emptyList()
         }
@@ -149,9 +150,5 @@ class MeusAnimes : AnimeHttpLegacySource() {
     private suspend fun videosFromUrl(url: String): List<Video> = when {
         "blogger.com" in url -> bloggerExtractor.videosFromUrl(url, headers)
         else -> emptyList()
-    }
-
-    companion object {
-        private val dateFormat = SimpleDateFormat("MMM. dd, yyyy", Locale.ENGLISH)
     }
 }
