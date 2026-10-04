@@ -435,7 +435,12 @@ class HexaWatch :
         ).sortVideos()
     }
 
-    override fun List<Video>.sortVideos(): List<Video> = sortedByDescending { it.videoTitle.contains(preferences.videoQualityPref) }
+    override fun List<Video>.sortVideos(): List<Video> {
+        val preferredQuality = preferences.videoQualityPref
+        return map { video ->
+            video.copy(preferred = video.videoTitle.contains(preferredQuality))
+        }.sortedByDescending { it.preferred }
+    }
 
     override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
