@@ -11,8 +11,7 @@ import android.webkit.WebViewClient
 import aniyomi.lib.m3u8server.M3u8Integration
 import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.model.Video
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.network.get
 import keiyoushi.utils.applicationContext
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.useAsJsoup
@@ -36,7 +35,7 @@ class AnimeItoExtractor(private val client: OkHttpClient, private val headers: H
         val qualityPrefix = if (serverName.isEmpty()) "Animei.to" else "Animei.to $serverName"
         // AniDrive rejects token embeds that are not requested with the episode page as Referer.
         val playerHeaders = headers.newBuilder().set("Referer", episodeUrl).build()
-        val playerDoc = client.newCall(GET(url, playerHeaders)).awaitSuccess().useAsJsoup()
+        val playerDoc = client.get(url, playerHeaders).useAsJsoup()
 
         // AniDrive embeds multiple TextDecoder scripts (service-worker first, player config later).
         // Decode each until playable sources are found instead of stopping at the first match.
