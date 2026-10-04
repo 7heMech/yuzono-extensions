@@ -82,15 +82,18 @@ class Wiflix :
 
     override suspend fun getHosterList(episode: SEpisode): List<Hoster> = episode.url.split(",").mapNotNull { url ->
         val host = url.toHttpUrlOrNull()?.host ?: return@mapNotNull null
+
+        fun matchesDomain(domain: String) = host == domain || host.endsWith(".$domain")
+
         val serverName = when {
-            "doods.pro" in host -> "Doodstream"
-            "vido.lol" in host -> "Vido"
-            "uqload.co" in host -> "Uqload"
-            "vudeo.co" in host -> "Vudeo"
-            "streamvid.net" in host -> "StreamVid"
-            "upstream.to" in host -> "Upstream"
-            "streamdav.com" in host -> "StreamDav"
-            "voe.sx" in host -> "Voe"
+            matchesDomain("doods.pro") -> "Doodstream"
+            matchesDomain("vido.lol") -> "Vido"
+            matchesDomain("uqload.co") -> "Uqload"
+            matchesDomain("vudeo.co") -> "Vudeo"
+            matchesDomain("streamvid.net") -> "StreamVid"
+            matchesDomain("upstream.to") -> "Upstream"
+            matchesDomain("streamdav.com") -> "StreamDav"
+            matchesDomain("voe.sx") -> "Voe"
             else -> return@mapNotNull null
         }
         Hoster(hosterUrl = url, hosterName = serverName)
