@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.animeextension.pt.animesdigital
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -25,7 +26,7 @@ class AnimesDigitalUrlActivity : Activity() {
 
         try {
             startActivity(mainIntent)
-        } catch (e: Throwable) {
+        } catch (e: ActivityNotFoundException) {
             Log.e(tag, "Unable to launch activity", e)
         }
 
