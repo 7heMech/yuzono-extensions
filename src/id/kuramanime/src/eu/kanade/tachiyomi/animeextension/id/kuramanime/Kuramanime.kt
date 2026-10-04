@@ -207,7 +207,7 @@ class Kuramanime :
             ?.let { getAuthorization(it) }
             ?: return emptyList()
 
-        val headers = headersBuilder()
+        val sourceHeaders = headersBuilder()
             .set("Referer", episodeUrl.toString())
             .set("X-Requested-With", "XMLHttpRequest")
             .set("X-CSRF-TOKEN", csrfToken)
@@ -216,9 +216,15 @@ class Kuramanime :
         val page = doc.selectFirst("#checkEp")?.attr("value")
             ?.takeUnless(String::isEmpty)
             ?.let { episodeUrl.resolve(it) }
+            ?.takeIf { it.scheme == episodeUrl.scheme && it.host == episodeUrl.host && it.port == episodeUrl.port }
             ?.let { checkUrl ->
                 runCatching {
-                    client.newCall(GET(checkUrl, headers)).awaitSuccess()
+                    // Keep source credentials on the checked origin, including when it returns a redirect.
+                    client.newBuilder()
+                        .followRedirects(false)
+                        .followSslRedirects(false)
+                        .build()
+                        .newCall(GET(checkUrl, sourceHeaders)).awaitSuccess()
                         .bodyString()
                         .trim('"', ' ', '\n')
                 }.onFailure { if (it is CancellationException) throw it }.getOrNull()
@@ -226,7 +232,7 @@ class Kuramanime :
             ?.takeUnless(String::isEmpty)
             ?: "1"
 
-        val authHeaders = headers.newBuilder()
+        val authHeaders = sourceHeaders.newBuilder()
             .set("X-Fuck-ID", scriptData.tokenId)
             .set("X-Request-ID", getRandomString())
             .set("X-Request-Index", "0")
@@ -247,7 +253,7 @@ class Kuramanime :
             .add("authorization", authorization)
             .build()
 
-        val playerDoc = client.newCall(POST(newUrl.toString(), headers, body))
+        val playerDoc = client.newCall(POST(newUrl.toString(), sourceHeaders, body))
             .awaitSuccess()
             .useAsJsoup()
 
