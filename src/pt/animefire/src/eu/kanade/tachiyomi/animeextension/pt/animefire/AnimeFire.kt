@@ -155,15 +155,21 @@ class AnimeFire :
     // ============================ Video Links =============================
     override fun hosterListParse(response: Response): List<Hoster> {
         val document = response.asJsoup()
-        val videoElement = document.selectFirst("video#my-video")
-        val url = videoElement?.absUrl("data-video-src")
-            ?: document.selectFirst("div#div_video iframe")?.absUrl("src")
-        if (url.isNullOrBlank()) return emptyList()
+        val videoUrl = document.selectFirst("video#my-video")
+            ?.takeIf { it.attr("data-video-src").isNotBlank() }
+            ?.absUrl("data-video-src")
+            ?.takeIf { it.isNotBlank() }
+        val url = videoUrl ?: document.select("div#div_video iframe")
+            .asSequence()
+            .filter { it.attr("src").isNotBlank() }
+            .map { it.absUrl("src") }
+            .firstOrNull { it.isNotBlank() }
+            ?: return emptyList()
         return listOf(
             Hoster(
                 hosterUrl = url,
                 hosterName = name,
-                internalData = if (videoElement != null) "json" else "iframe",
+                internalData = if (videoUrl != null) "json" else "iframe",
             ),
         )
     }
