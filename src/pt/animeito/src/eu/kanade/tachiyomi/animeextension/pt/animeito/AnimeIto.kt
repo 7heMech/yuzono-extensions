@@ -5,8 +5,7 @@ import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.multisrc.animestream.AnimeStream
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.network.get
 import keiyoushi.utils.useAsJsoup
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -24,8 +23,7 @@ class AnimeIto :
 
     override fun videoListSelector() = "ul.tabs_videos li"
 
-    override suspend fun getHosterList(episode: SEpisode): List<Hoster> = client.newCall(GET(baseUrl + episode.url, headers))
-        .awaitSuccess()
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> = client.get(baseUrl + episode.url)
         .use(::hosterListParse)
 
     override fun hosterListParse(response: Response): List<Hoster> {
