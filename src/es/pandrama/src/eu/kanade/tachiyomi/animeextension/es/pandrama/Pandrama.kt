@@ -174,7 +174,7 @@ class Pandrama :
                     }
                     episode_number = episode.episodeNumber.toFloat()
                     date_upload = episodeDateFormat.tryParse(episode.releaseDate?.take(DATE_LENGTH))
-                    url = "${resolved.url}/season/${episode.seasonNumber}/episode/${episode.episodeNumber}"
+                    url = "${resolved.url.trimEnd('/')}/season/${episode.seasonNumber}/episode/${episode.episodeNumber}"
                 }
             }
             .reversed()
@@ -302,6 +302,6 @@ class Pandrama :
 
         private const val DATE_LENGTH = 10
         private val QUALITY_REGEX = Regex("""(\d+)p""")
-        private val EPISODE_URL_REGEX = Regex("""/titles/(\d+)/[^/]+/season/(\d+)/episode/(\d+)""")
+        private val EPISODE_URL_REGEX = Regex("""/titles/(\d+)(?:/[^/]+)?/season/(\d+)/episode/(\d+)""")
     }
 }
