@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.animeextension.es.animeav1
 import aniyomi.lib.m3u8server.M3u8Integration
 import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.model.Video
-import eu.kanade.tachiyomi.network.GET
+import keiyoushi.network.get
 import keiyoushi.utils.bodyString
 import keiyoushi.utils.decodeHex
 import keiyoushi.utils.parseAs
@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import okhttp3.CacheControl
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -26,7 +27,7 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
     private val m3u8Integration by lazy { M3u8Integration(client) }
 
-    fun videosFromUrl(url: String, prefix: String = ""): List<Video> {
+    suspend fun videosFromUrl(url: String, prefix: String = ""): List<Video> {
         val playerUrl = url.toHttpUrl()
         val origin = "${playerUrl.scheme}://${playerUrl.host}"
         val videoId = playerUrl.fragment?.substringBefore("&")?.takeIf(String::isNotEmpty) ?: return emptyList()
@@ -42,7 +43,7 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
             .addQueryParameter("r", "animeav1.com")
             .build()
 
-        val payload = client.newCall(GET(apiUrl, playerHeaders)).execute().bodyString().trim()
+        val payload = client.get(apiUrl, playerHeaders, cacheControl = CacheControl.FORCE_NETWORK).bodyString().trim()
         val streams = decrypt(payload).parseAs<UnsStreams>()
 
         val config = runCatching { streams.streamingConfig?.parseAs<StreamingConfig>() }.getOrNull() ?: StreamingConfig()
