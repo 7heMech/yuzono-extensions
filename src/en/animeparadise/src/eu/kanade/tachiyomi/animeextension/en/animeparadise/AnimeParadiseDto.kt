@@ -37,7 +37,7 @@ class AnimeObject(
 ) {
     fun toSAnime(): SAnime = SAnime.create().apply {
         title = this@AnimeObject.title
-        thumbnail_url = posterImage.original ?: posterImage.large ?: posterImage.medium ?: posterImage.small
+        thumbnail_url = posterImage.url
         url = LinkData(slug = link, id = id).toJsonString()
     }
 }
@@ -48,7 +48,10 @@ class ImageObject(
     val large: String? = null,
     val medium: String? = null,
     val small: String? = null,
-)
+) {
+    // Kitsu "original" links are often pre-signed S3 URLs that expire after 15 minutes
+    val url get() = large ?: medium ?: small ?: original?.takeUnless { "X-Amz-" in it }
+}
 
 @Serializable
 class LinkData(
@@ -65,9 +68,11 @@ class AnimeDetailsResponse(
 class AnimeDetails(
     private val synopsys: String? = null,
     private val genres: List<String>? = null,
+    private val posterImage: ImageObject? = null,
 ) {
     fun toSAnime(): SAnime = SAnime.create().apply {
         description = synopsys
+        thumbnail_url = posterImage?.url
         genre = genres?.joinToString()
     }
 }
