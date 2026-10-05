@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
+import keiyoushi.utils.addSwitchPreference
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
@@ -50,6 +51,8 @@ class AnimeAv1 :
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080"
         private val QUALITY_LIST = arrayOf("1080", "720", "480", "360")
+
+        private const val PREF_MEGA_SOFTWARE_DECODING_KEY = "mega_software_decoding"
 
         private const val PREF_LANG_KEY = "preferred_language"
         private const val PREF_LANG_DEFAULT = "SUB"
@@ -226,7 +229,13 @@ class AnimeAv1 :
         val host = url.toHttpUrlOrNull()?.host.orEmpty().lowercase(Locale.ROOT)
         val matched = findServer(host) ?: findServer(serverName.lowercase(Locale.ROOT))
         return when (matched) {
-            "mega" -> megaExtractor.videosFromUrl(url, "$prefix ")
+            "mega" -> megaExtractor.videosFromUrl(url, "$prefix ").map { video ->
+                if (preferences.getBoolean(PREF_MEGA_SOFTWARE_DECODING_KEY, true)) {
+                    video.copy(mpvArgs = video.mpvArgs.filterNot { it.first == "hwdec" } + ("hwdec" to "no"))
+                } else {
+                    video
+                }
+            }
             "uns" -> unsExtractor.videosFromUrl(url, "$prefix ")
             "voe" -> voeExtractor.videosFromUrl(url, "$prefix ")
             "pixeldrain" -> pixelDrainExtractor.videosFromUrl(url, "$prefix ")
@@ -311,5 +320,12 @@ class AnimeAv1 :
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
         }.also(screen::addPreference)
+
+        screen.addSwitchPreference(
+            key = PREF_MEGA_SOFTWARE_DECODING_KEY,
+            default = true,
+            title = "Use software decoding for Mega",
+            summary = "Uses software decoding in the built-in player to avoid green lines. Turn off to use your player's decoder setting.",
+        )
     }
 }

@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.animeextension.es.animeav1
 
-import aniyomi.lib.m3u8server.M3u8Integration
 import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.model.Video
 import keiyoushi.network.get
@@ -25,7 +24,6 @@ import javax.crypto.spec.SecretKeySpec
 class UnsExtractor(private val client: OkHttpClient, private val headers: Headers) {
 
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
-    private val m3u8Integration by lazy { M3u8Integration(client) }
 
     suspend fun videosFromUrl(url: String, prefix: String = ""): List<Video> {
         val playerUrl = url.toHttpUrl()
@@ -50,7 +48,6 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
         val cloudflarePath = streams.cf?.takeIf(String::isNotBlank) ?: streams.cfNative
         val paths = mapOf(
             "Cloudflare" to cloudflarePath,
-            "Tiktok" to streams.hlsVideoTiktok,
             "Google" to streams.hlsVideoGoogle,
             "In-House" to streams.source,
         )
@@ -69,14 +66,13 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
                         encodedPath(resolvedUrl.encodedPath.replace("/hls/", "/hlsmod/$domain/"))
                     }
                 }.build().toString()
-                val videos = playlistUtils.extractFromHls(
+                playlistUtils.extractFromHls(
                     playlistUrl,
                     referer = "$origin/",
                     masterHeaders = playerHeaders,
                     videoHeaders = playerHeaders,
                     videoNameGen = { quality -> "${prefix}UPNShare $network - $quality" },
                 )
-                if (network == "Tiktok") m3u8Integration.processVideoList(videos) else videos
             }.getOrDefault(emptyList())
         }
     }
@@ -95,7 +91,6 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
 
     @Serializable
     class UnsStreams(
-        val hlsVideoTiktok: String? = null,
         val hlsVideoGoogle: String? = null,
         val cf: String? = null,
         val cfNative: String? = null,
@@ -105,7 +100,7 @@ class UnsExtractor(private val client: OkHttpClient, private val headers: Header
 
     @Serializable
     private class StreamingConfig(
-        val order: List<String> = listOf("Tiktok", "Google", "Cloudflare", "In-House"),
+        val order: List<String> = listOf("Google", "Cloudflare", "In-House"),
         val adjust: Map<String, NetworkAdjustment> = emptyMap(),
     )
 
