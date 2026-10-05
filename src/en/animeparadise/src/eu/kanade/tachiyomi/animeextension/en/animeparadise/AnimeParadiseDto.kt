@@ -34,9 +34,10 @@ class AnimeObject(
     val title: String,
     val link: String,
     val posterImage: ImageObject,
+    val alternativeTitle: AlternativeTitle? = null,
 ) {
-    fun toSAnime(): SAnime = SAnime.create().apply {
-        title = this@AnimeObject.title
+    fun toSAnime(titleLang: String): SAnime = SAnime.create().apply {
+        title = alternativeTitle.pick(titleLang) ?: this@AnimeObject.title
         thumbnail_url = posterImage.url
         url = LinkData(slug = link, id = id).toJsonString()
     }
@@ -54,6 +55,18 @@ class ImageObject(
 }
 
 @Serializable
+class AlternativeTitle(
+    val english: String? = null,
+    val native: String? = null,
+)
+
+private fun AlternativeTitle?.pick(titleLang: String): String? = when (titleLang) {
+    "english" -> this?.english
+    "native" -> this?.native
+    else -> null
+}?.takeIf { it.isNotBlank() }
+
+@Serializable
 class LinkData(
     val slug: String,
     val id: String,
@@ -66,12 +79,22 @@ class AnimeDetailsResponse(
 
 @Serializable
 class AnimeDetails(
+    private val title: String,
+    private val alternativeTitle: AlternativeTitle? = null,
     private val synopsys: String? = null,
     private val genres: List<String>? = null,
     private val posterImage: ImageObject? = null,
 ) {
-    fun toSAnime(): SAnime = SAnime.create().apply {
-        description = synopsys
+    fun toSAnime(titleLang: String): SAnime = SAnime.create().apply {
+        val displayTitle = alternativeTitle.pick(titleLang) ?: this@AnimeDetails.title
+        title = displayTitle
+        val otherTitles = listOfNotNull(this@AnimeDetails.title, alternativeTitle?.english, alternativeTitle?.native)
+            .filter { it.isNotBlank() && it != displayTitle }
+            .distinct()
+        description = buildString {
+            if (otherTitles.isNotEmpty()) append("Also known as: ${otherTitles.joinToString()}\n\n")
+            synopsys?.let(::append)
+        }.trim().ifEmpty { null }
         thumbnail_url = posterImage?.url
         genre = genres?.joinToString()
     }

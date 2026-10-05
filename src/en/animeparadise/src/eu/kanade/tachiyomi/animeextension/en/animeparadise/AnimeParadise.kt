@@ -60,7 +60,7 @@ class AnimeParadise :
 
     override fun popularAnimeParse(response: Response): AnimesPage {
         val result = response.parseAs<AnimeListResponse>()
-        return AnimesPage(result.data.map { it.toSAnime() }, result.pagination.hasNext)
+        return AnimesPage(result.data.map { it.toSAnime(titleLang) }, result.pagination.hasNext)
     }
 
     // =============================== Latest ===============================
@@ -83,7 +83,7 @@ class AnimeParadise :
         val result = response.parseAs<RecentEpisodesResponse>()
         val animeList = result.data.map { it.origin }
             .filter { seenLatest.add(it.link) }
-            .map { it.toSAnime() }
+            .map { it.toSAnime(titleLang) }
         return AnimesPage(animeList, result.pagination.hasNext)
     }
 
@@ -167,7 +167,7 @@ class AnimeParadise :
         return GET("$apiUrl/anime/${data.slug}", apiHeaders)
     }
 
-    override fun animeDetailsParse(response: Response): SAnime = response.parseAs<AnimeDetailsResponse>().data.toSAnime()
+    override fun animeDetailsParse(response: Response): SAnime = response.parseAs<AnimeDetailsResponse>().data.toSAnime(titleLang)
 
     // ============================== Episodes ==============================
 
@@ -231,6 +231,8 @@ class AnimeParadise :
 
     // ============================= Utilities ==============================
 
+    private val titleLang get() = preferences.getString(PREF_TITLE_LANG_KEY, PREF_TITLE_LANG_DEFAULT)!!
+
     override fun List<Video>.sortVideos(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
 
@@ -246,6 +248,9 @@ class AnimeParadise :
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080"
 
+        private const val PREF_TITLE_LANG_KEY = "preferred_title_lang"
+        private const val PREF_TITLE_LANG_DEFAULT = "romaji"
+
         private val QUALITY_REGEX = Regex("""(\d+)p""")
     }
 
@@ -259,6 +264,15 @@ class AnimeParadise :
             entryValues = arrayOf("1080", "720", "480", "360")
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
+        }.also(screen::addPreference)
+
+        ListPreference(screen.context).apply {
+            key = PREF_TITLE_LANG_KEY
+            title = "Preferred title language"
+            entries = arrayOf("Romaji", "English", "Native")
+            entryValues = arrayOf("romaji", "english", "native")
+            setDefaultValue(PREF_TITLE_LANG_DEFAULT)
+            summary = "%s\nFalls back to Romaji when unavailable. Refresh library entries to apply."
         }.also(screen::addPreference)
     }
 }
