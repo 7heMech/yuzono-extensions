@@ -78,7 +78,7 @@ object OctopusDash : NanoHTTPD("127.0.0.1", 0) {
         val stream = synchronized(this) { streams[id] } ?: return notFound()
         return try {
             when {
-                parts.size == 1 && parts[0].endsWith(".mpd") -> manifest(stream, id, session.headers["range"])
+                parts.size == 1 && parts[0].endsWith(".mpd") -> manifest(stream, id)
                 parts.size == 3 -> segment(stream, id, parts[1], parts[2], session.headers["range"])
                 else -> notFound()
             }
@@ -87,7 +87,7 @@ object OctopusDash : NanoHTTPD("127.0.0.1", 0) {
         }
     }
 
-    private fun manifest(stream: Stream, id: String, rangeHeader: String?): Response {
+    private fun manifest(stream: Stream, id: String): Response {
         val playlists = stream.loadPlaylists()
         val video = playlists.getValue(VIDEO)
         val baseUrl = "http://127.0.0.1:$listeningPort/$id"
@@ -98,8 +98,7 @@ object OctopusDash : NanoHTTPD("127.0.0.1", 0) {
             playlists[AUDIO]?.let { appendAdaptationSet(AUDIO, it, baseUrl) }
             append("</Period></MPD>")
         }
-        // Served with range support so the player sees a seekable input and can start at a resume position.
-        return respond(mpd.toByteArray(), "application/dash+xml", rangeHeader)
+        return newFixedLengthResponse(Status.OK, "application/dash+xml", mpd)
     }
 
     private fun segment(stream: Stream, id: String, track: String, name: String, rangeHeader: String?): Response {
