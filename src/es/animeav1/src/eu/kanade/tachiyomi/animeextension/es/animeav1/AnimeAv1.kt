@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import aniyomi.lib.doodextractor.DoodExtractor
+import aniyomi.lib.megaextractor.MegaExtractor
 import aniyomi.lib.mp4uploadextractor.Mp4uploadExtractor
 import aniyomi.lib.pixeldrainextractor.PixelDrainExtractor
 import aniyomi.lib.streamtapeextractor.StreamTapeExtractor
@@ -60,6 +61,7 @@ class AnimeAv1 :
         private val SERVER_LIST = arrayOf(
             "PixelDrain",
             "UPNShare",
+            "Mega",
             "HLS",
             "StreamWish",
             "Voe",
@@ -69,6 +71,8 @@ class AnimeAv1 :
             "VidHide",
             "StreamTape",
         )
+
+        private val MEGA_HOSTS = listOf("mega.nz", "mega.co.nz")
 
         private val QUALITY_REGEX = Regex("""(\d+)p""")
         private val SERVER_REGEX = Regex("""\{\s*server\s*:\s*"([^"]*)"\s*,\s*url\s*:\s*"([^"]*)"\s*\}""")
@@ -153,23 +157,29 @@ class AnimeAv1 :
         val script = doc.selectFirst("script:containsData(node_ids)")?.data() ?: return emptyList()
 
         val embeds = script.substringAfter("embeds:", "").substringBefore("downloads:")
-        if (embeds.isEmpty()) return emptyList()
+        val downloads = script.substringAfter("downloads:", "")
 
-        fun processMatches(regex: Regex, type: String): List<Triple<String, String, String>> = regex.findAll(embeds)
+        fun processMatches(block: String, regex: Regex, type: String): List<Triple<String, String, String>> = regex.findAll(block)
             .flatMap { SERVER_REGEX.findAll(it.groupValues[1]) }
             .map {
+                val url = it.groupValues[2]
                 Triple(
-                    it.groupValues[2].substringBefore("?embed"),
+                    if (url.toHttpUrlOrNull()?.host in MEGA_HOSTS) url else url.substringBefore("?embed"),
                     it.groupValues[1],
                     type,
                 )
             }
             .distinctBy { it.first }.toList()
 
-        val dubServers = processMatches(DUB_REGEX, "DUB")
-        val subServers = processMatches(SUB_REGEX, "SUB")
+        fun servers(type: String, regex: Regex) = processMatches(embeds, regex, type) +
+            processMatches(downloads, regex, type).filter { (url, _, _) ->
+                url.toHttpUrlOrNull()?.host in MEGA_HOSTS
+            }
 
-        return (dubServers + subServers).map { (url, server, type) ->
+        val dubServers = servers("DUB", DUB_REGEX)
+        val subServers = servers("SUB", SUB_REGEX)
+
+        return (dubServers + subServers).distinctBy { it.first to it.third }.map { (url, server, type) ->
             val matched = findServer(url.toHttpUrlOrNull()?.host.orEmpty().lowercase(Locale.ROOT))
                 ?: findServer(server.lowercase(Locale.ROOT))
             val name = when (matched) {
@@ -208,6 +218,7 @@ class AnimeAv1 :
     private val doodExtractor by lazy { DoodExtractor(client) }
     private val universalExtractor by lazy { UniversalExtractor(client) }
 
+    private val megaExtractor by lazy { MegaExtractor(client, headers) }
     private val unsExtractor by lazy { UnsExtractor(client, headers) }
     private val streamTapeExtractor by lazy { StreamTapeExtractor(client) }
 
@@ -215,6 +226,7 @@ class AnimeAv1 :
         val host = url.toHttpUrlOrNull()?.host.orEmpty().lowercase(Locale.ROOT)
         val matched = findServer(host) ?: findServer(serverName.lowercase(Locale.ROOT))
         return when (matched) {
+            "mega" -> megaExtractor.videosFromUrl(url, "$prefix ")
             "uns" -> unsExtractor.videosFromUrl(url, "$prefix ")
             "voe" -> voeExtractor.videosFromUrl(url, "$prefix ")
             "pixeldrain" -> pixelDrainExtractor.videosFromUrl(url, "$prefix ")
@@ -236,9 +248,13 @@ class AnimeAv1 :
         }
     }
 
-    private fun findServer(source: String): String? = conventions.firstOrNull { (_, names) ->
-        names.any { it.lowercase(Locale.ROOT) in source }
-    }?.first
+    private fun findServer(source: String): String? = if (source == "mega" || source in MEGA_HOSTS) {
+        "mega"
+    } else {
+        conventions.firstOrNull { (_, names) ->
+            names.any { it.lowercase(Locale.ROOT) in source }
+        }?.first
+    }
 
     private val conventions = listOf(
         "uns" to listOf("uns.bio", "upnshare"),
