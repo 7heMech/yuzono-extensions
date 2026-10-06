@@ -161,7 +161,6 @@ class AniDB :
             playlistUrl = link,
             masterHeaders = headers,
             videoHeaders = headers,
-            videoNameGen = { quality -> "${hoster.hosterName} - $quality" },
         )
     }
 
