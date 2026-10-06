@@ -445,9 +445,12 @@ class Senshi :
 
         return entries.flatMap { entry ->
             // A "both" source carries both audio renditions and is split by language
-            // in the proxy; separate "sub"/"dub" sources are picked by label.
-            val source = entry.sources.firstOrNull { it.label.equals(if (isDub) "dub" else "sub", ignoreCase = true) }
-                ?: entry.sources.firstOrNull()
+            // in the proxy; separate "sub"/"dub" sources are picked by label, and a
+            // source labeled for the other audio type is never used.
+            val wanted = if (isDub) "dub" else "sub"
+            val unwanted = if (isDub) "sub" else "dub"
+            val source = entry.sources.firstOrNull { it.label.equals(wanted, ignoreCase = true) }
+                ?: entry.sources.firstOrNull { !it.label.equals(unwanted, ignoreCase = true) }
                 ?: return@flatMap emptyList()
             val audioLanguage = if (isDub) "en" else "ja"
 

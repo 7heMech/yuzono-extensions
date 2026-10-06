@@ -54,12 +54,13 @@ class EM3u8Proxy(
                     // Episode images and subtitles; both need the referer (subtitles also
                     // sit behind Cloudflare), which the player does not send.
                     else -> {
+                        val path = res.request.url.encodedPath
                         val mime = when {
-                            finalUrl.endsWith(".ass") -> "text/x-ssa"
-                            finalUrl.endsWith(".vtt") -> "text/vtt"
-                            finalUrl.endsWith(".jpg") || finalUrl.endsWith(".jpeg") -> "image/jpeg"
-                            finalUrl.endsWith(".webp") -> "image/webp"
-                            finalUrl.endsWith(".png") -> "image/png"
+                            path.endsWith(".ass") -> "text/x-ssa"
+                            path.endsWith(".vtt") -> "text/vtt"
+                            path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
+                            path.endsWith(".webp") -> "image/webp"
+                            path.endsWith(".png") -> "image/png"
                             else -> "application/octet-stream"
                         }
                         newFixedLengthResponse(Status.OK, mime, bytes.inputStream(), bytes.size.toLong())
