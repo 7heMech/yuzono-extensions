@@ -152,8 +152,7 @@ class ExtractorSourceDto(
     val url: String = "",
 )
 
-fun JsonElement.toSourceList(): List<ExtractorSourceDto>? =
-    (this as? JsonArray)?.map { it.parseAs<ExtractorSourceDto>() }
+fun JsonElement.toSourceList(): List<ExtractorSourceDto>? = (this as? JsonArray)?.map { it.parseAs<ExtractorSourceDto>() }
 
 // ============================== Subtitles ===============================
 
