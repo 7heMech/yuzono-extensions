@@ -95,7 +95,6 @@ class ServerListDto(
 @Serializable
 class ServerDto(
     val id: String,
-    val lang: String,
 )
 
 @Serializable

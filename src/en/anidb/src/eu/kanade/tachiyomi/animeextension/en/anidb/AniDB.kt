@@ -137,19 +137,21 @@ class AniDB :
 
     override fun hosterListRequest(episode: SEpisode): Request = GET("$PLAY_URL/api/episode/${episode.url}/servers", headers)
 
-    // Each language is listed twice ("Server #1", "Server #2") with the same id
+    // Server ids are "<episodeId>/<language code>", and each one is listed twice ("Server #1", "Server #2")
     override fun hosterListParse(response: Response): List<Hoster> = response.parseAs<ServerListDto>().list
         .distinctBy { it.id }
         .map { server ->
+            val langCode = server.id.substringAfterLast('/')
             Hoster(
                 hosterUrl = "$PLAY_URL/api/episode/${server.id}/iframe",
-                hosterName = server.lang.uppercase(),
+                hosterName = LANGUAGES[langCode] ?: langCode.uppercase(),
+                internalData = langCode,
             )
         }
 
     override fun List<Hoster>.sortHosters(): List<Hoster> {
         val langPref = preferences.getString(PREF_LANG_KEY, PREF_LANG_DEFAULT)!!
-        return sortedByDescending { it.hosterUrl.endsWith("/$langPref/iframe") }
+        return sortedByDescending { it.internalData == langPref }
     }
 
     override suspend fun getVideoList(hoster: Hoster): List<Video> {
@@ -241,7 +243,13 @@ class AniDB :
         private const val PREF_LANG_KEY = "preferred_lang"
         private const val PREF_LANG_TITLE = "Preferred Language"
         private const val PREF_LANG_DEFAULT = "jpn"
-        private val PREF_LANG_ENTRIES = listOf("Sub (Japanese)", "Dub (English)")
-        private val PREF_LANG_VALUES = listOf("jpn", "eng")
+        private val LANGUAGES = mapOf(
+            "jpn" to "Japanese",
+            "eng" to "English",
+            "chi" to "Chinese",
+            "kor" to "Korean",
+        )
+        private val PREF_LANG_ENTRIES = LANGUAGES.values.toList()
+        private val PREF_LANG_VALUES = LANGUAGES.keys.toList()
     }
 }
