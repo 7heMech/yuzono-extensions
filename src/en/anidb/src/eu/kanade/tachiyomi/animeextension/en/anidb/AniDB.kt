@@ -244,7 +244,8 @@ class AniDB :
 
     // Entries saved from the old site use "/anime/<slug>-<id>", where post id = id + 1e9
     private fun String.toPostId(): Long {
-        val id = POST_ID_REGEX.find(this)!!.value.toLong()
+        val id = POST_ID_REGEX.find(trimEnd('/'))?.value?.toLong()
+            ?: throw IllegalArgumentException("Invalid AniDB URL: $this")
         return if (id < POST_ID_OFFSET) id + POST_ID_OFFSET else id
     }
 
