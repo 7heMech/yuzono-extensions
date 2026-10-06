@@ -153,27 +153,18 @@ class CapTokenProvider {
             <body>
             <script>
             (function () {
-                // Snapshot of the signals Cap's automation checks read, reported on failure.
-                var navOwn = ['webdriver', 'userAgent', 'platform', 'languages', 'plugins', 'deviceMemory'];
-                var env = 'outer ' + outerWidth + 'x' + outerHeight +
-                    ', inner ' + innerWidth + 'x' + innerHeight +
-                    ', focus ' + document.hasFocus() +
-                    ', webdriver ' + navigator.webdriver +
-                    ', productSub ' + navigator.productSub +
-                    ', navOwn [' + Object.getOwnPropertyNames(navigator).filter(function (k) {
-                        return navOwn.indexOf(k) >= 0;
-                    }) + ']';
                 function fail(message) {
-                    $BRIDGE_NAME.onError(String(message) + ' [' + env + ']');
+                    $BRIDGE_NAME.onError(String(message));
                 }
 
-                // A WebView that is not attached to a window reports a 0x0 outer size, which Cap's
-                // instrumentation (run in a srcdoc iframe) treats as an automated browser.
+                // hexa.su's Cap server blocks any non-Firefox browser reporting no plugins, which is
+                // every Android browser. Report a non-empty PluginArray inside the instrumentation
+                // iframe, defined on the prototype since it also rejects own properties on navigator.
                 var shim = '<script>(function () {' +
-                    'if (outerWidth && outerHeight) return;' +
-                    'var w = screen.width, h = screen.height;' +
-                    'Object.defineProperty(window, "outerWidth", { get: function () { return w; }, configurable: true });' +
-                    'Object.defineProperty(window, "outerHeight", { get: function () { return h; }, configurable: true });' +
+                    'if (navigator.plugins.length) return;' +
+                    'var plugins = Object.create(PluginArray.prototype);' +
+                    'Object.defineProperty(plugins, "length", { value: 5 });' +
+                    'Object.defineProperty(Navigator.prototype, "plugins", { get: function () { return plugins; }, configurable: true, enumerable: true });' +
                     '})();<\/script>';
                 var srcdoc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc');
                 Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', {
