@@ -14,7 +14,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.network.get
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parallelCatchingMapNotNull
@@ -152,11 +152,8 @@ class AniDB :
         return sortedByDescending { it.hosterUrl.endsWith("/$langPref/iframe") }
     }
 
-    override fun videoListRequest(hoster: Hoster): Request = GET(hoster.hosterUrl, playHeaders)
-
     override suspend fun getVideoList(hoster: Hoster): List<Video> {
-        val link = client.newCall(videoListRequest(hoster)).awaitSuccess()
-            .parseAs<IframeDto>().link
+        val link = client.get(hoster.hosterUrl, playHeaders).parseAs<IframeDto>().link
 
         return playlistUtils.extractFromHls(
             playlistUrl = link,
@@ -198,7 +195,7 @@ class AniDB :
     // ============================= Utilities ==============================
 
     private suspend fun getSectionAnime(name: String): AnimesPage {
-        val posts = client.newCall(popularAnimeRequest(1)).awaitSuccess()
+        val posts = client.get(popularAnimeRequest(1).url)
             .parseAs<HomeDto>().sections
             .firstOrNull { it.name == name }
             ?.posts.orEmpty()
@@ -206,7 +203,7 @@ class AniDB :
     }
 
     private suspend fun getPostsPage(request: Request): AnimesPage {
-        val posts = client.newCall(request).awaitSuccess().parseAs<PostListDto>().posts
+        val posts = client.get(request.url).parseAs<PostListDto>().posts
         return AnimesPage(posts.toSAnimeList(), posts.size >= PAGE_SIZE)
     }
 
@@ -214,7 +211,7 @@ class AniDB :
     private suspend fun List<PostItemDto>.toSAnimeList(): List<SAnime> = parallelCatchingMapNotNull { fetchPost(it.id).toSAnime() }
 
     private suspend fun fetchPost(id: Long): PostDto = postCache[id]
-        ?: client.newCall(postRequest(id)).awaitSuccess().parseAs<PostDto>()
+        ?: client.get(postRequest(id).url).parseAs<PostDto>()
             .also { postCache.put(id, it) }
 
     private fun postRequest(id: Long): Request = GET("$baseUrl/api/post?id=$id", headers)
