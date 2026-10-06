@@ -153,9 +153,35 @@ class CapTokenProvider {
             <body>
             <script>
             (function () {
+                // Snapshot of the signals Cap's automation checks read, reported on failure.
+                var navOwn = ['webdriver', 'userAgent', 'platform', 'languages', 'plugins', 'deviceMemory'];
+                var env = 'outer ' + outerWidth + 'x' + outerHeight +
+                    ', inner ' + innerWidth + 'x' + innerHeight +
+                    ', focus ' + document.hasFocus() +
+                    ', webdriver ' + navigator.webdriver +
+                    ', productSub ' + navigator.productSub +
+                    ', navOwn [' + Object.getOwnPropertyNames(navigator).filter(function (k) {
+                        return navOwn.indexOf(k) >= 0;
+                    }) + ']';
                 function fail(message) {
-                    $BRIDGE_NAME.onError(String(message));
+                    $BRIDGE_NAME.onError(String(message) + ' [' + env + ']');
                 }
+
+                // A WebView that is not attached to a window reports a 0x0 outer size, which Cap's
+                // instrumentation (run in a srcdoc iframe) treats as an automated browser.
+                var shim = '<script>(function () {' +
+                    'if (outerWidth && outerHeight) return;' +
+                    'var w = screen.width, h = screen.height;' +
+                    'Object.defineProperty(window, "outerWidth", { get: function () { return w; }, configurable: true });' +
+                    'Object.defineProperty(window, "outerHeight", { get: function () { return h; }, configurable: true });' +
+                    '})();<\/script>';
+                var srcdoc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc');
+                Object.defineProperty(HTMLIFrameElement.prototype, 'srcdoc', {
+                    configurable: true,
+                    enumerable: srcdoc.enumerable,
+                    get: function () { return srcdoc.get.call(this); },
+                    set: function (value) { srcdoc.set.call(this, String(value).replace('<head>', '<head>' + shim)); },
+                });
                 var script = document.createElement('script');
                 script.src = '$CAP_WIDGET_URL';
                 script.onerror = function () { fail('Failed to load the Cap widget'); };
