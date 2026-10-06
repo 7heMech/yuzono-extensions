@@ -79,7 +79,7 @@ class EpisodeDto(
     private val filler: Boolean = false,
 ) {
     fun toSEpisode(offset: Float): SEpisode = SEpisode.create().apply {
-        val adjustedNumber = (number.toFloatOrNull() ?: 0f) - offset
+        val adjustedNumber = number.toFloatOrNull()?.minus(offset) ?: 0f
         name = "Episode ${adjustedNumber.toString().removeSuffix(".0")}"
         episode_number = adjustedNumber
         fillermark = filler

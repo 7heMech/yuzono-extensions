@@ -125,7 +125,7 @@ class AniDB :
     override fun episodeListParse(response: Response): List<SEpisode> {
         val episodes = response.parseAs<EpisodeListDto>().list
 
-        val minEpNumber = episodes.minOfOrNull { it.number.toFloatOrNull() ?: 0f } ?: 0f
+        val minEpNumber = episodes.mapNotNull { it.number.toFloatOrNull() }.minOrNull() ?: 0f
         val offset = if (minEpNumber > 1f) minEpNumber - 1f else 0f
 
         return episodes.map { it.toSEpisode(offset) }.reversed()
