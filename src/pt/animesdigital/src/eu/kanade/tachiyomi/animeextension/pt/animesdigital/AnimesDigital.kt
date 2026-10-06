@@ -231,8 +231,8 @@ class AnimesDigital :
         val document = response.useAsJsoup()
         val player = document.selectFirst("div#player") ?: return emptyList()
         return player.select("div.tab-video").flatMapIndexed { index, tab ->
-            val tabName = document.select("a[href]")
-                .firstOrNull { it.attr("href") == "#${tab.id()}" }?.text()
+            val tabName = document.select("li[data-tab], a[href]")
+                .firstOrNull { (it.attr("data-tab").ifEmpty { it.attr("href") }) == "#${tab.id()}" }?.text()
                 ?.takeIf(String::isNotBlank) ?: "Server ${index + 1}"
             tab.select(videoSelector).map { element ->
                 Hoster(
@@ -253,34 +253,35 @@ class AnimesDigital :
     override fun seasonListSelector() = throw UnsupportedOperationException()
     override fun seasonFromElement(element: Element) = throw UnsupportedOperationException()
 
-    private val protectorExtractor by lazy { ProtectorExtractor(client) }
+    private val protectorExtractor by lazy { ProtectorExtractor(client, headers) }
     private val bloggerExtractor by lazy { BloggerExtractor(client) }
 
     private suspend fun videosFromElement(element: Element): List<Video> = when (element.tagName()) {
-        "iframe" -> {
-            val url = element.absUrl("data-lazy-src").ifEmpty { element.absUrl("src") }
-            when {
-                "blogger.com" in url -> bloggerExtractor.videosFromUrl(url, headers)
-                else -> {
-                    client.newCall(GET(url, headers)).awaitSuccess()
-                        .useAsJsoup()
-                        .select(videoSelector)
-                        .parallelCatchingFlatMap(::videosFromElement)
-                }
-            }
-        }
+        "iframe" -> videosFromEmbedUrl(element.absUrl("data-lazy-src").ifEmpty { element.absUrl("src") })
 
         "script" -> ScriptExtractor.videosFromScript(element.data(), headers)
 
-        "a" -> protectorExtractor.videosFromUrl(element.attr("href"))
+        "a" -> protectorExtractor.embedUrlFromUrl(element.absUrl("href"))
+            ?.let { videosFromEmbedUrl(it) }
+            .orEmpty()
 
         else -> emptyList()
+    }
+
+    private suspend fun videosFromEmbedUrl(url: String): List<Video> = when {
+        "blogger.com" in url -> bloggerExtractor.videosFromUrl(url, headers)
+        else -> {
+            client.newCall(GET(url, headers)).awaitSuccess()
+                .useAsJsoup()
+                .select(videoSelector)
+                .parallelCatchingFlatMap(::videosFromElement)
+        }
     }
 
     private val scriptSelectors = listOf("eval", "player.src", "this.src", "sources:")
         .joinToString { "script:containsData($it):not(:containsData(/bg.mp4))" }
 
-    private val videoSelector = "iframe, $scriptSelectors"
+    private val videoSelector = "iframe, a.ad-protected-cover, $scriptSelectors"
 
     // ============================== Settings ==============================
     override fun setupPreferenceScreen(screen: PreferenceScreen) {

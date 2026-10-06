@@ -1,23 +1,30 @@
 package eu.kanade.tachiyomi.animeextension.pt.animesdigital.extractors
 
-import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
 import keiyoushi.utils.useAsJsoup
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 
-private const val HOST = "https://sabornutritivo.com"
+class ProtectorExtractor(private val client: OkHttpClient, private val headers: Headers) {
+    /**
+     * Follows the ad-protected player link (campaign page → meta refresh → article page)
+     * and returns the embed URL the article reveals after its countdown.
+     */
+    suspend fun embedUrlFromUrl(url: String): String? {
+        var nextUrl = if (url.startsWith("//")) "https:$url" else url
+        repeat(MAX_HOPS) {
+            val document = client.newCall(GET(nextUrl, headers)).awaitSuccess().useAsJsoup()
+            document.selectFirst("[data-url]")?.absUrl("data-url")?.takeIf(String::isNotEmpty)
+                ?.let { return it }
+            nextUrl = document.selectFirst("meta[http-equiv=refresh]")?.attr("content")
+                ?.substringAfter("url=", "")?.takeIf(String::isNotEmpty)
+                ?: return null
+        }
+        return null
+    }
 
-class ProtectorExtractor(private val client: OkHttpClient) {
-    suspend fun videosFromUrl(url: String): List<Video> {
-        val fixedUrl = if (!url.startsWith("https")) "https:$url" else url
-        val token = fixedUrl.toHttpUrl().queryParameter("token")!!
-        val headers = Headers.headersOf("cookie", "token=$token;")
-        val doc = client.newCall(GET("$HOST/social.php", headers)).awaitSuccess().useAsJsoup()
-        val videoHeaders = Headers.headersOf("referer", doc.location())
-        val iframeUrl = doc.selectFirst("iframe")!!.attr("src").trim()
-        return listOf(Video(iframeUrl, "Animes Digital", iframeUrl, videoHeaders))
+    companion object {
+        private const val MAX_HOPS = 4
     }
 }
