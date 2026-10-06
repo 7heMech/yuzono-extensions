@@ -236,9 +236,18 @@ class FilmiFen : AnimeHttpSource() {
         "vdn" -> videosFromVidon(hoster.hosterUrl)
         "okr" -> okruExtractor.videosFromUrl(hoster.hosterUrl)
         "voe" -> voeExtractor.videosFromUrl(hoster.hosterUrl)
-        "fmo" -> filemoonExtractor.videosFromUrl(hoster.hosterUrl, prefix = "BSE - ", headers = byseHeaders, referer = "$baseUrl/")
+        "fmo" -> videosFromByse(hoster.hosterUrl)
         TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl)
         else -> throw UnsupportedOperationException("Неподдържан плеър: ${hoster.hosterName}")
+    }
+
+    private fun videosFromByse(url: String): List<Video> {
+        // A fresh challenge can succeed when the shared PoW solver reaches its iteration limit.
+        repeat(2) {
+            val videos = filemoonExtractor.videosFromUrl(url, prefix = "BSE - ", headers = byseHeaders, referer = "$baseUrl/")
+            if (videos.isNotEmpty()) return videos
+        }
+        throw IllegalStateException("BSE: видеото не е намерено")
     }
 
     private suspend fun videosFromVidon(url: String): List<Video> {
