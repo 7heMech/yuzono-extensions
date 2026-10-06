@@ -46,6 +46,12 @@ class FilmiFen : AnimeHttpSource() {
     private val okruExtractor by lazy { OkruExtractor(client, headers) }
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
+    private val youtubeExtractor by lazy { YoutubeExtractor(client, headers) }
+    private val byseHeaders by lazy {
+        headers.newBuilder()
+            .set("X-Embed-Origin", baseUrl.toHttpUrl().host)
+            .build()
+    }
 
     override fun popularAnimeRequest(page: Int) = catalogueRequest(page, "news_read;desc")
 
@@ -139,7 +145,7 @@ class FilmiFen : AnimeHttpSource() {
 
     private fun detailsFromDocument(document: Document) = SAnime.create().apply {
         url = articlePath(document.location())
-        title = document.selectFirst(".movie__bg-title")!!.text()
+        title = document.movieTitle()
         thumbnail_url = document.selectFirst(".poster__img img")?.imageUrl()
         author = document.select(".js-directors a").joinToString { it.text() }
         genre = document.select(".js-genres a").joinToString { it.text() }
@@ -174,13 +180,27 @@ class FilmiFen : AnimeHttpSource() {
         val document = response.asJsoup()
         val navigation = document.selectFirst(".series-episodes")
         if (navigation == null) {
-            return listOf(
-                SEpisode.create().apply {
-                    url = articlePath(document.location())
-                    name = document.selectFirst(".movie__bg-title")!!.text()
-                    episode_number = 1F
-                },
-            )
+            val title = document.movieTitle()
+            val path = articlePath(document.location())
+            val hasTrailer = !document.playerUrls()[TRAILER_KEY].isNullOrEmpty()
+            return buildList {
+                add(
+                    SEpisode.create().apply {
+                        url = path
+                        name = "Филм: $title"
+                        episode_number = if (hasTrailer) 2F else 1F
+                    },
+                )
+                if (hasTrailer) {
+                    add(
+                        SEpisode.create().apply {
+                            url = "$path#$TRAILER_KEY"
+                            name = "Трейлър: $title"
+                            episode_number = 1F
+                        },
+                    )
+                }
+            }
         }
         return navigation.select(".series-episode").map { element ->
             SEpisode.create().apply {
@@ -191,10 +211,19 @@ class FilmiFen : AnimeHttpSource() {
         }.sortedByDescending { it.episode_number }
     }
 
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
+        if (episode.url.substringAfter('#', "") != TRAILER_KEY) return super.getHosterList(episode)
+        // Filmifen redirects short article URLs, which removes the trailer fragment.
+        return client.newCall(hosterListRequest(episode)).awaitSuccess().use { response ->
+            val trailer = response.asJsoup().playerUrls()[TRAILER_KEY]?.takeIf { it.isNotEmpty() }
+                ?: throw IllegalStateException("Трейлърът не е намерен")
+            listOf(Hoster(hosterUrl = trailer, hosterName = "YouTube", internalData = TRAILER_KEY))
+        }
+    }
+
     override fun hosterListParse(response: Response): List<Hoster> {
         val document = response.asJsoup()
-        val script = document.select("script").joinToString("\n") { it.data() }
-        val urls = PLAYER_REGEX.findAll(script).associate { it.groupValues[1] to it.groupValues[2] }
+        val urls = document.playerUrls()
         return document.select(".tab-btn[data-player]").mapNotNull { button ->
             val key = button.attr("data-player")
             if (key !in SUPPORTED_PLAYERS) return@mapNotNull null
@@ -207,7 +236,8 @@ class FilmiFen : AnimeHttpSource() {
         "vdn" -> videosFromVidon(hoster.hosterUrl)
         "okr" -> okruExtractor.videosFromUrl(hoster.hosterUrl)
         "voe" -> voeExtractor.videosFromUrl(hoster.hosterUrl)
-        "fmo" -> filemoonExtractor.videosFromUrl(hoster.hosterUrl, prefix = "BSE - ", headers = headers, referer = "$baseUrl/")
+        "fmo" -> filemoonExtractor.videosFromUrl(hoster.hosterUrl, prefix = "BSE - ", headers = byseHeaders, referer = "$baseUrl/")
+        TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl)
         else -> throw UnsupportedOperationException("Неподдържан плеър: ${hoster.hosterName}")
     }
 
@@ -244,13 +274,23 @@ class FilmiFen : AnimeHttpSource() {
 
     private fun Element.imageUrl() = absUrl(if (hasAttr("data-src")) "data-src" else "src")
 
+    private fun Document.movieTitle(): String = selectFirst(".movie__bg-title")?.text()?.takeIf(String::isNotEmpty)
+        ?: selectFirst(".movie__original-title")?.text()?.takeIf(String::isNotEmpty)
+        ?: throw IllegalStateException("Заглавието не е намерено")
+
+    private fun Document.playerUrls(): Map<String, String> {
+        val script = select("script").joinToString("\n") { it.data() }
+        return PLAYER_REGEX.findAll(script).associate { it.groupValues[1] to it.groupValues[2] }
+    }
+
     private fun articlePath(url: String) = "/${url.toHttpUrl().pathSegments.last()}"
 
     private fun seriesKey(url: String) = SERIES_REGEX.matchEntire(url.substringAfterLast('/'))?.groupValues?.get(1)
 
     companion object {
         private val SERIES_REGEX = Regex("""\d+-(.+)-season-\d+-episode-\d+\.html""")
-        private val PLAYER_REGEX = Regex("""\b(vdn|okr|fmo|voe):"([^"]*)"""")
+        private const val TRAILER_KEY = "trailer"
+        private val PLAYER_REGEX = Regex("""\b(trailer|vdn|okr|fmo|voe):"([^"]*)"""")
         private val HLS_REGEX = Regex("""file:\s*"([^"]+\.m3u8[^\"]*)"""")
         private val SUPPORTED_PLAYERS = setOf("vdn", "okr", "fmo", "voe")
         private val CATEGORIES = listOf(
