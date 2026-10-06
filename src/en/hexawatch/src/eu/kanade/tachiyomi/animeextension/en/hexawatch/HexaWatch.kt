@@ -463,15 +463,14 @@ class HexaWatch :
         val subtitles = getSubtitles(data.requestUrl)
         val videos = playlistUtils.extractFromHls(
             playlistUrl = playlistUrl,
-            videoNameGen = { quality -> "${data.server} - $quality" },
             subtitleList = subtitles,
             referer = "$baseUrl/",
         )
         // Single-rendition playlists carry no resolution, so read it from the first segment.
-        val single = videos.singleOrNull()?.takeIf { it.videoTitle == "${data.server} - Video" }
+        val single = videos.singleOrNull()?.takeIf { it.videoTitle == "Video" }
             ?: return videos.sortVideos()
         val quality = probeQuality(playlistUrl, single.headers ?: headers) ?: return videos.sortVideos()
-        return listOf(single.copy(videoTitle = "${data.server} - $quality")).sortVideos()
+        return listOf(single.copy(videoTitle = quality)).sortVideos()
     }
 
     private suspend fun probeQuality(playlistUrl: String, videoHeaders: Headers): String? = try {
