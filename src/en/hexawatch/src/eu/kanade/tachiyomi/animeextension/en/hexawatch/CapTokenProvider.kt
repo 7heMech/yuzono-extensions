@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.animeextension.en.hexawatch
 import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
@@ -23,7 +24,7 @@ import java.util.concurrent.atomic.AtomicReference
  * `hexa.su` origin. The token is cached in memory and only re-solved when it expires or when the
  * API rejects it.
  */
-class CapTokenProvider(private val userAgent: String?) {
+class CapTokenProvider {
 
     private val handler = Handler(Looper.getMainLooper())
     private val mutex = Mutex()
@@ -87,8 +88,16 @@ class CapTokenProvider(private val userAgent: String?) {
         with(webView.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
-            userAgent?.let { userAgentString = it }
         }
+
+        // Cap's instrumentation rejects a focused window whose outer size is 0x0, which is what an
+        // off-screen WebView reports until it has been laid out.
+        val metrics = applicationContext.resources.displayMetrics
+        webView.measure(
+            View.MeasureSpec.makeMeasureSpec(metrics.widthPixels, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(metrics.heightPixels, View.MeasureSpec.EXACTLY),
+        )
+        webView.layout(0, 0, metrics.widthPixels, metrics.heightPixels)
 
         webView.addJavascriptInterface(CapBridge(result), BRIDGE_NAME)
         webView.webViewClient = object : WebViewClient() {
@@ -152,11 +161,22 @@ class CapTokenProvider(private val userAgent: String?) {
                 script.onerror = function () { fail('Failed to load the Cap widget'); };
                 script.onload = function () {
                     try {
-                        new Cap({ apiEndpoint: '$CAP_ENDPOINT' }).solve().then(function (solution) {
+                        var widget = document.createElement('cap-widget');
+                        widget.setAttribute('data-cap-api-endpoint', '$CAP_ENDPOINT');
+                        widget.setAttribute('data-cap-disable-haptics', '');
+                        widget.addEventListener('solve', function (event) {
+                            if (event.detail && event.detail.token) {
+                                $BRIDGE_NAME.onToken(event.detail.token);
+                            }
+                        });
+                        widget.addEventListener('error', function (event) {
+                            var detail = event.detail || {};
+                            fail(detail.code ? detail.code + ': ' + detail.message : detail.message || 'Unknown error');
+                        });
+                        document.body.appendChild(widget);
+                        widget.solve().then(function (solution) {
                             if (solution && solution.token) {
                                 $BRIDGE_NAME.onToken(solution.token);
-                            } else {
-                                fail('No token returned');
                             }
                         }, function (error) {
                             fail(error && error.message ? error.message : error);

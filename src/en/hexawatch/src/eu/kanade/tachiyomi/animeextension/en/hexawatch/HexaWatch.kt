@@ -61,7 +61,7 @@ class HexaWatch :
 
     private val playlistUtils by lazy { PlaylistUtils(client, headers) }
 
-    private val capTokenProvider by lazy { CapTokenProvider(headers["User-Agent"]) }
+    private val capTokenProvider by lazy { CapTokenProvider() }
 
     // ============================== Popular ===============================
     override fun popularAnimeRequest(page: Int): Request {
