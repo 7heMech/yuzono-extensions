@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.animeextension.en.hexawatch
 
 import android.content.SharedPreferences
 import android.text.InputType
+import android.util.Base64
 import androidx.preference.PreferenceScreen
 import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
@@ -27,17 +28,18 @@ import keiyoushi.utils.toJsonRequestBody
 import keiyoushi.utils.toJsonString
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.CacheControl
+import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import uy.kohesive.injekt.injectLazy
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 class HexaWatch :
     AnimeHttpSource(),
@@ -54,8 +56,6 @@ class HexaWatch :
     override val lang = "en"
 
     override val supportsLatest = true
-
-    private val json: Json by injectLazy()
 
     private val preferences by getPreferencesLazy()
 
@@ -360,11 +360,24 @@ class HexaWatch :
     // ============================ Video Links =============================
     override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val requestUrl = videoRequestUrl(episode)
-        val key = ByteArray(32).apply { SECURE_RANDOM.nextBytes(this) }
-            .joinToString("") { "%02x".format(it) }
+        val key = randomHex(32)
 
-        val encryptedText = fetchEncryptedSources(requestUrl, key)
-        return hosterListParseAsync(requestUrl, encryptedText, key)
+        val serverList = fetchSources(requestUrl, key, Headers.headersOf(SERVER_LIST_HEADER, "1"))
+        val urls = serverList.sourceUrls()
+        val servers = (serverList.sources?.toSourceList().orEmpty().map { it.server } + serverList.servers.keys)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedBy { NATO_SERVERS.indexOf(it).takeIf { i -> i >= 0 } ?: NATO_SERVERS.size }
+
+        return servers.map { server ->
+            Hoster(
+                hosterName = "Server: $server",
+                hosterUrl = requestUrl,
+                internalData = HosterData(requestUrl, server, key, urls[server]).toJsonString(),
+            )
+        }.ifEmpty {
+            throw Exception("No servers found")
+        }
     }
 
     private fun videoRequestUrl(episode: SEpisode): String {
@@ -376,13 +389,18 @@ class HexaWatch :
         }
     }
 
-    private suspend fun fetchEncryptedSources(requestUrl: String, key: String): String {
+    /**
+     * Requests [requestUrl] with the headers the site's source loader sends, then decrypts the
+     * response. Each request is signed with [key], which is also the decryption key.
+     */
+    private suspend fun fetchSources(requestUrl: String, key: String, extraHeaders: Headers): ExtractorResultDto {
         var capToken = capTokenProvider.getToken()
         for (attempt in 1..CAPTCHA_ATTEMPTS) {
             val videoHeaders = headers.newBuilder()
+                .addAll(extraHeaders)
+                .addAll(signedHeaders(requestUrl, key))
                 .set("Accept", "text/plain")
                 .set("Referer", "$baseUrl/")
-                .add("X-Api-Key", key)
                 .add("X-Fingerprint-Lite", FINGERPRINT_LITE)
                 .add("X-Cap-Token", capToken)
                 .build()
@@ -391,7 +409,10 @@ class HexaWatch :
                 .use { it.code to it.body.string() }
 
             when {
-                code in 200..299 -> return body
+                code in 200..299 -> {
+                    if (body.isBlank()) throw Exception("HexaWatch returned an empty source response")
+                    return decryptSources(body, key)
+                }
                 code == 403 && "captcha_required" in body -> {
                     capTokenProvider.invalidate(capToken)
                     if (attempt < CAPTCHA_ATTEMPTS) capToken = capTokenProvider.getToken()
@@ -402,33 +423,46 @@ class HexaWatch :
         throw Exception("The captcha token was rejected by the server")
     }
 
-    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
-    private suspend fun hosterListParseAsync(requestUrl: String, encryptedText: String, key: String): List<Hoster> {
-        val decryptionPayload = json.encodeToString(mapOf("text" to encryptedText, "key" to key))
-        val requestBody = decryptionPayload.toJsonRequestBody()
+    private suspend fun signedHeaders(requestUrl: String, key: String): Headers {
+        val timestamp = client.get(TIME_URL, headers, CacheControl.FORCE_NETWORK)
+            .use { it.parseAs<ServerTimeDto>() }.timestamp.toString()
+        val nonce = Base64.encodeToString(ByteArray(16).also(SECURE_RANDOM::nextBytes), Base64.NO_WRAP)
+            .replace(NONCE_STRIP_REGEX, "")
+            .take(22)
+        val path = requestUrl.toHttpUrl().encodedPath
+        val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(key.toByteArray(), "HmacSHA256")) }
+        val signature = Base64.encodeToString(mac.doFinal("$key:$timestamp:$nonce:$path".toByteArray()), Base64.NO_WRAP)
 
-        val extractorData = client.newCall(
-            Request.Builder().url(decryptionApiUrl).post(requestBody).build(),
-        ).awaitSuccess().use { decryptionResponse ->
-            decryptionResponse.parseAs<ExtractorResponseDto>()
-        }
-
-        return extractorData.result.sources.filter { it.url.isNotBlank() }.map { source ->
-            Hoster(
-                hosterName = "Server: ${source.server}",
-                hosterUrl = source.url,
-                internalData = HosterData(requestUrl, source.server).toJsonString(),
-            )
-        }.ifEmpty {
-            throw Exception("No servers found. Check extractor API response.")
-        }
+        return Headers.headersOf(
+            "X-Api-Key", key,
+            "X-Request-Timestamp", timestamp,
+            "X-Request-Nonce", nonce,
+            "X-Request-Signature", signature,
+            "X-Client-Fingerprint", clientFingerprint,
+        )
     }
+
+    private suspend fun decryptSources(encryptedText: String, key: String): ExtractorResultDto {
+        val requestBody = DecryptionRequestDto(encryptedText, key).toJsonRequestBody()
+        val response = client.newCall(Request.Builder().url(decryptionApiUrl).post(requestBody).build())
+            .awaitSuccess().use { it.parseAs<ExtractorResponseDto>() }
+        return (response.result as? JsonObject)?.let { it.parseAs<ExtractorResultDto>() }
+            ?: throw Exception("Failed to decrypt sources: ${response.error ?: "empty result"}")
+    }
+
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
 
     override suspend fun getVideoList(hoster: Hoster): List<Video> {
         val data = hoster.internalData.parseAs<HosterData>()
+        val playlistUrl = data.url
+            ?: fetchSources(data.requestUrl, data.key, Headers.headersOf("X-Only-Sources", "1", "X-Server", data.server))
+                .sourceUrls()
+                .let { it[data.server] ?: it.values.firstOrNull() }
+            ?: return emptyList()
+
         val subtitles = getSubtitles(data.requestUrl)
         return playlistUtils.extractFromHls(
-            playlistUrl = hoster.hosterUrl,
+            playlistUrl = playlistUrl,
             videoNameGen = { quality -> "Server: ${data.server} - $quality" },
             subtitleList = subtitles,
             referer = "$baseUrl/",
@@ -445,7 +479,13 @@ class HexaWatch :
     override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
     @Serializable
-    private class HosterData(val requestUrl: String, val server: String)
+    private class HosterData(val requestUrl: String, val server: String, val key: String, val url: String?)
+
+    private fun randomHex(bytes: Int) = ByteArray(bytes).also(SECURE_RANDOM::nextBytes)
+        .joinToString("") { "%02x".format(it) }
+
+    // Stands in for the site's hashed screen/UA/canvas fingerprint; only needs to be stable.
+    private val clientFingerprint by lazy { randomHex(4).toLong(16).toString(36) }
 
     private suspend fun getSubtitles(requestUrl: String): List<Track> {
         val match = GET_SUBTITLES_REGEX.find(requestUrl)
@@ -537,6 +577,20 @@ class HexaWatch :
         // Constant sent by the site's own fetch wrapper on every source request.
         private const val FINGERPRINT_LITE = "e9136c41504646444"
         private const val CAPTCHA_ATTEMPTS = 2
+
+        private const val TIME_URL = "https://theemoviedb.hexa.su/api/time"
+
+        // Base64 "mothafaka"; the site sends it on the server list request only.
+        private const val SERVER_LIST_HEADER = "bW90aGFmYWth"
+
+        private val NONCE_STRIP_REGEX by lazy { "[/+=]".toRegex() }
+
+        // Order the site tries servers in.
+        private val NATO_SERVERS = listOf(
+            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima",
+            "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey",
+            "xray", "yankee", "zulu",
+        )
 
         private val GET_SUBTITLES_REGEX by lazy { "/(movie|tv)/(\\d+)(?:/season/(\\d+)/episode/(\\d+))?".toRegex() }
 
