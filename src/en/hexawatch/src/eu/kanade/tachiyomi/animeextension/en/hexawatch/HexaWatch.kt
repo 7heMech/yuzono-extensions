@@ -371,7 +371,7 @@ class HexaWatch :
 
         return servers.map { server ->
             Hoster(
-                hosterName = "Server: $server",
+                hosterName = server,
                 hosterUrl = requestUrl,
                 internalData = HosterData(requestUrl, server, key, urls[server]).toJsonString(),
             )
@@ -461,12 +461,47 @@ class HexaWatch :
             ?: return emptyList()
 
         val subtitles = getSubtitles(data.requestUrl)
-        return playlistUtils.extractFromHls(
+        val videos = playlistUtils.extractFromHls(
             playlistUrl = playlistUrl,
-            videoNameGen = { quality -> "Server: ${data.server} - $quality" },
+            videoNameGen = { quality -> "${data.server} - $quality" },
             subtitleList = subtitles,
             referer = "$baseUrl/",
-        ).sortVideos()
+        )
+        // Single-rendition playlists carry no resolution, so read it from the first segment.
+        val single = videos.singleOrNull()?.takeIf { it.videoTitle == "${data.server} - Video" }
+            ?: return videos.sortVideos()
+        val quality = probeQuality(playlistUrl, single.headers ?: headers) ?: return videos.sortVideos()
+        return listOf(single.copy(videoTitle = "${data.server} - $quality")).sortVideos()
+    }
+
+    private suspend fun probeQuality(playlistUrl: String, videoHeaders: Headers): String? = try {
+        val segment = client.get(playlistUrl, videoHeaders).use { it.body.string() }
+            .lineSequence()
+            .firstOrNull { it.isNotBlank() && !it.startsWith("#") }
+            ?.let { playlistUrl.toHttpUrl().resolve(it.trim()) }
+        segment?.let { url ->
+            // The proxy ignores Range requests; read the start and drop the rest.
+            val head = client.get(url, videoHeaders, CacheControl.FORCE_NETWORK).use { response ->
+                val source = response.body.source()
+                source.request(SEGMENT_PROBE_BYTES)
+                source.buffer.readByteArray(minOf(source.buffer.size, SEGMENT_PROBE_BYTES))
+            }
+            H264Resolution.parse(head)?.let { (width, height) -> "${qualityLabel(width, height)} (${width}x$height)" }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun qualityLabel(width: Int, height: Int) = when {
+        width >= 3840 -> "2160p"
+        width >= 2560 -> "1440p"
+        width >= 1920 -> "1080p"
+        width >= 1280 -> "720p"
+        width >= 854 -> "480p"
+        width >= 640 -> "360p"
+        else -> "${height}p"
     }
 
     override fun List<Video>.sortVideos(): List<Video> {
@@ -577,6 +612,7 @@ class HexaWatch :
         // Constant sent by the site's own fetch wrapper on every source request.
         private const val FINGERPRINT_LITE = "e9136c41504646444"
         private const val CAPTCHA_ATTEMPTS = 2
+        private const val SEGMENT_PROBE_BYTES = 64 * 1024L
 
         private const val TIME_URL = "https://theemoviedb.hexa.su/api/time"
 
