@@ -62,6 +62,8 @@ class AnimesDigital :
     override fun popularAnimeFromElement(element: Element) = latestUpdatesFromElement(element)
     override fun popularAnimeNextPageSelector() = null
 
+    override fun popularAnimeParse(response: Response) = super.popularAnimeParse(response).distinctByTitle()
+
     // =============================== Latest ===============================
     override suspend fun getLatestUpdates(page: Int): AnimesPage {
         animesDigitalFilters.fetchFilters()
@@ -81,6 +83,11 @@ class AnimesDigital :
     }
 
     override fun latestUpdatesNextPageSelector() = "ul > li.next"
+
+    // Listing cards link to episodes, so an anime with several new episodes shows up once per episode
+    override fun latestUpdatesParse(response: Response) = super.latestUpdatesParse(response).distinctByTitle()
+
+    private fun AnimesPage.distinctByTitle() = AnimesPage(animes.distinctBy { it.title }, hasNextPage)
 
     // =============================== Search ===============================
     override fun getFilterList(): AnimeFilterList = animesDigitalFilters.getFilterList()
