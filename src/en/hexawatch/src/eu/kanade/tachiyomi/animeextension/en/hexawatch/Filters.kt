@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.animeextension.en.hexawatch
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 
-object HexaWatchFilters {
+object Filters {
 
     class TypeFilter : AnimeFilter.Select<String>("Type", arrayOf("Movie", "TV Show"))
 

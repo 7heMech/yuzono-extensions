@@ -148,10 +148,10 @@ class HexaWatch :
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
-        val type = filters.filterIsInstance<HexaWatchFilters.TypeFilter>().first().state.let {
+        val type = filters.filterIsInstance<Filters.TypeFilter>().first().state.let {
             if (it == 0) "movie" else "tv"
         }
-        val sortFilter = filters.filterIsInstance<HexaWatchFilters.SortFilter>().first()
+        val sortFilter = filters.filterIsInstance<Filters.SortFilter>().first()
         val sortBy = sortFilter.state?.run {
             when (index) {
                 0 -> "popularity"
@@ -160,8 +160,8 @@ class HexaWatch :
             } + if (ascending) ".asc" else ".desc"
         } ?: "popularity.desc"
 
-        val genreMap = if (type == "movie") HexaWatchFilters.MOVIE_GENRE_MAP else HexaWatchFilters.TV_GENRE_MAP
-        val genres = filters.filterIsInstance<HexaWatchFilters.GenreFilter>().first()
+        val genreMap = if (type == "movie") Filters.MOVIE_GENRE_MAP else Filters.TV_GENRE_MAP
+        val genres = filters.filterIsInstance<Filters.GenreFilter>().first()
             .state.filter { it.state }.mapNotNull { genreMap[it.name] }.joinToString(",")
 
         val url = apiUrl.toHttpUrl().newBuilder().apply {
@@ -175,7 +175,7 @@ class HexaWatch :
             }
 
             // ====== Watch Provider Filter ======
-            val providers = filters.filterIsInstance<HexaWatchFilters.WatchProviderFilter>()
+            val providers = filters.filterIsInstance<Filters.WatchProviderFilter>()
                 .firstOrNull()
                 ?.state
                 ?.filter { it.state }
@@ -194,7 +194,7 @@ class HexaWatch :
 
     // ============================== Filters ===============================
 
-    override fun getFilterList(): AnimeFilterList = HexaWatchFilters.getFilterList()
+    override fun getFilterList(): AnimeFilterList = Filters.getFilterList()
 
     // ============================== Details ===============================
     override fun getAnimeUrl(anime: SAnime): String = animeUrl + anime.url
