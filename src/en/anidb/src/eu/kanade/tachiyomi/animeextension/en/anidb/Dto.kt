@@ -76,13 +76,13 @@ class EpisodeListDto(
 class EpisodeDto(
     private val id: String,
     val number: String,
-    val filler: Boolean = false,
+    private val filler: Boolean = false,
 ) {
-    fun toSEpisode(offset: Float, showFillerTag: Boolean): SEpisode = SEpisode.create().apply {
+    fun toSEpisode(offset: Float): SEpisode = SEpisode.create().apply {
         val adjustedNumber = (number.toFloatOrNull() ?: 0f) - offset
         name = "Episode ${adjustedNumber.toString().removeSuffix(".0")}"
-        if (filler && showFillerTag) name += " (Filler)"
         episode_number = adjustedNumber
+        fillermark = filler
         url = id
     }
 }

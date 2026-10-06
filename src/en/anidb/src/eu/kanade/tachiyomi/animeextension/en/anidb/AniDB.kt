@@ -3,7 +3,6 @@ package eu.kanade.tachiyomi.animeextension.en.anidb
 import android.util.LruCache
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
-import androidx.preference.SwitchPreferenceCompat
 import aniyomi.lib.playlistutils.PlaylistUtils
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
@@ -129,13 +128,7 @@ class AniDB :
         val minEpNumber = episodes.minOfOrNull { it.number.toFloatOrNull() ?: 0f } ?: 0f
         val offset = if (minEpNumber > 1f) minEpNumber - 1f else 0f
 
-        val hideFiller = preferences.getBoolean(PREF_FILLER_HIDE_KEY, PREF_FILLER_HIDE_DEFAULT)
-        val showFillerTag = preferences.getBoolean(PREF_FILLER_TAG_KEY, PREF_FILLER_TAG_DEFAULT)
-
-        return episodes
-            .filter { !hideFiller || !it.filler }
-            .map { it.toSEpisode(offset, showFillerTag) }
-            .reversed()
+        return episodes.map { it.toSEpisode(offset) }.reversed()
     }
 
     override fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
@@ -200,22 +193,6 @@ class AniDB :
             summary = "%s"
             screen.addPreference(this)
         }
-
-        SwitchPreferenceCompat(screen.context).apply {
-            key = PREF_FILLER_TAG_KEY
-            title = PREF_FILLER_TAG_TITLE
-            setDefaultValue(PREF_FILLER_TAG_DEFAULT)
-            summary = "Adds '(Filler)' to episode names when available."
-            screen.addPreference(this)
-        }
-
-        SwitchPreferenceCompat(screen.context).apply {
-            key = PREF_FILLER_HIDE_KEY
-            title = PREF_FILLER_HIDE_TITLE
-            setDefaultValue(PREF_FILLER_HIDE_DEFAULT)
-            summary = "Hides detected filler episodes from episode list."
-            screen.addPreference(this)
-        }
     }
 
     // ============================= Utilities ==============================
@@ -230,7 +207,7 @@ class AniDB :
 
     private suspend fun getPostsPage(request: Request): AnimesPage {
         val posts = client.newCall(request).awaitSuccess().parseAs<PostListDto>().posts
-        return AnimesPage(posts.toSAnimeList(), posts.isNotEmpty())
+        return AnimesPage(posts.toSAnimeList(), posts.size >= PAGE_SIZE)
     }
 
     // List endpoints only return ids and posters, so titles come from each post
@@ -255,6 +232,7 @@ class AniDB :
         private const val POPULAR_SECTION = "Most Popular"
         private const val POST_ID_OFFSET = 1_000_000_000L
         private const val POST_CACHE_SIZE = 300
+        private const val PAGE_SIZE = 30
 
         private val POST_ID_REGEX = Regex("""\d+$""")
 
@@ -268,13 +246,5 @@ class AniDB :
         private const val PREF_LANG_DEFAULT = "jpn"
         private val PREF_LANG_ENTRIES = listOf("Sub (Japanese)", "Dub (English)")
         private val PREF_LANG_VALUES = listOf("jpn", "eng")
-
-        private const val PREF_FILLER_TAG_KEY = "append_filler_tag"
-        private const val PREF_FILLER_TAG_TITLE = "Filler Detection"
-        private const val PREF_FILLER_TAG_DEFAULT = true
-
-        private const val PREF_FILLER_HIDE_KEY = "hide_filler"
-        private const val PREF_FILLER_HIDE_TITLE = "Hide Filler Episodes"
-        private const val PREF_FILLER_HIDE_DEFAULT = false
     }
 }
