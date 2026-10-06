@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.animeextension.bg.filmifen
+package aniyomi.lib.youtubeextractor
 
 import kotlinx.serialization.Serializable
 
@@ -36,6 +36,7 @@ internal class YoutubePlayabilityStatus(val status: String, val reason: String? 
 internal class YoutubeStreamingData(
     val hlsManifestUrl: String? = null,
     val formats: List<YoutubeFormat> = emptyList(),
+    val adaptiveFormats: List<YoutubeFormat> = emptyList(),
 )
 
 @Serializable
@@ -43,4 +44,15 @@ internal class YoutubeFormat(
     val url: String? = null,
     val mimeType: String,
     val qualityLabel: String? = null,
+    val height: Int? = null,
+    val fps: Int? = null,
+    val bitrate: Int? = null,
+    val audioTrack: YoutubeAudioTrack? = null,
+)
+
+@Serializable
+internal class YoutubeAudioTrack(
+    val id: String? = null,
+    val displayName: String? = null,
+    val audioIsDefault: Boolean = false,
 )

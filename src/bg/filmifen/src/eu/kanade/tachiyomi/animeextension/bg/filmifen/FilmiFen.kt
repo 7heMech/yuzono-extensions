@@ -5,6 +5,7 @@ import aniyomi.lib.filemoonextractor.FilemoonExtractor
 import aniyomi.lib.okruextractor.OkruExtractor
 import aniyomi.lib.playlistutils.PlaylistUtils
 import aniyomi.lib.voeextractor.VoeExtractor
+import aniyomi.lib.youtubeextractor.YoutubeExtractor
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -46,7 +47,7 @@ class FilmiFen : AnimeHttpSource() {
     private val okruExtractor by lazy { OkruExtractor(client, headers) }
     private val voeExtractor by lazy { VoeExtractor(client, headers) }
     private val filemoonExtractor by lazy { FilemoonExtractor(client) }
-    private val youtubeExtractor by lazy { YoutubeExtractor(client, headers) }
+    private val youtubeExtractor by lazy { YoutubeExtractor(client, headers, country = "BG") }
     private val byseHeaders by lazy {
         headers.newBuilder()
             .set("X-Embed-Origin", baseUrl.toHttpUrl().host)

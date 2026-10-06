@@ -1,0 +1,22 @@
+# YouTube extractor
+
+Extracts YouTube HLS, progressive MP4 and adaptive video streams from watch,
+embed, Shorts and youtu.be URLs. HLS audio groups stay paired with their video
+variants; adaptive video streams include separate audio tracks.
+
+Add `implementation(project(":lib:youtubeextractor"))` to the extension's
+dependencies, then call the suspend API:
+
+```kotlin
+private val youtubeExtractor by lazy { YoutubeExtractor(client, headers) }
+
+override suspend fun getVideoList(hoster: Hoster): List<Video> =
+    youtubeExtractor.videosFromUrl(hoster.hosterUrl)
+```
+
+Stream labels include resolution, codec and frame rate. Identical choices keep
+the highest bitrate. The extractor preserves the caller's User-Agent and
+reports YouTube's playback restrictions, including sign-in and bot checks.
+
+The `VISIONOS` visitor/player request flow is based on
+[NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor/blob/65cabc2ba5216ee871ace4a9963c08bdbf5d5dc0/extractor/src/main/java/org/schabi/newpipe/extractor/services/youtube/YoutubeStreamHelper.java).

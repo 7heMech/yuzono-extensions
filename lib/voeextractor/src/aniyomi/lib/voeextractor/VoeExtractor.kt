@@ -1,5 +1,6 @@
 package aniyomi.lib.voeextractor
 
+import android.media.MediaMetadataRetriever
 import android.util.Base64
 import android.util.Log
 import aniyomi.lib.playlistutils.PlaylistUtils
@@ -79,13 +80,37 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
             ).let { videoList.addAll(it) }
         }
         if (mp4 != null) {
-            val mp4Quality = if (displayPrefix == "VOE") "VOE:MP4" else "$displayPrefix - VOE MP4"
+            val videoHeaders = headers.newBuilder().set("Referer", baseUrl).build()
+            val dimensions = mp4Dimensions(mp4, videoHeaders)
+            val resolution = dimensions?.let { (width, height) -> "${playlistUtils.standardQuality(height.toString())} (${width}x$height)" }
+                ?: "Unknown quality"
+            val mp4Quality = if (displayPrefix == "VOE") "VOE:MP4 - $resolution" else "$displayPrefix - VOE MP4 - $resolution"
             videoList.add(
-                Video(mp4, mp4Quality + subHint, mp4, subtitleTracks = tracks),
+                Video(
+                    videoUrl = mp4,
+                    videoTitle = mp4Quality + subHint,
+                    resolution = dimensions?.second,
+                    headers = videoHeaders,
+                    subtitleTracks = tracks,
+                ),
             )
         }
 
         return videoList
+    }
+
+    private fun mp4Dimensions(url: String, headers: Headers): Pair<Int, Int>? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(url, headers.toMap())
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            if (width != null && height != null && width > 0 && height > 0) width to height else null
+        } catch (_: Exception) {
+            null
+        } finally {
+            retriever.release()
+        }
     }
 
     private fun decryptF7(p8: String): JsonObject? = try {
