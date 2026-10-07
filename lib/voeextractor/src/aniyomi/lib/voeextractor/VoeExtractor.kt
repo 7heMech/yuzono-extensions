@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import uy.kohesive.injekt.injectLazy
+import java.io.IOException
 
 class VoeExtractor(private val client: OkHttpClient, private val headers: Headers) {
 
@@ -25,9 +26,26 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
 
     private val playlistUtils by lazy { PlaylistUtils(clientDdos, headers) }
 
+    private val checkedPlaylistUtils by lazy {
+        val playlistClient = clientDdos.newBuilder().addInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            try {
+                if (!response.isSuccessful || !response.peekBody(64).string().trimStart().removePrefix("\uFEFF").startsWith("#EXTM3U")) {
+                    throw IOException("VOE: HLS playlist is unavailable")
+                }
+                response
+            } catch (e: IOException) {
+                response.close()
+                throw e
+            }
+        }.build()
+        PlaylistUtils(playlistClient, headers)
+    }
+
     private val redirectRegex = Regex("""window.location.href\s*=\s*'([^']+)';""")
 
-    fun videosFromUrl(url: String, prefix: String = ""): List<Video> {
+    /** With [mp4AsFallback], the MP4 is only returned when no HLS stream can be extracted. */
+    fun videosFromUrl(url: String, prefix: String = "", mp4AsFallback: Boolean = false): List<Video> {
         val videoList = mutableListOf<Video>()
         var document = clientDdos.newCall(GET(url, headers)).execute().asJsoup()
         var baseUrl = url
@@ -70,15 +88,21 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
         val subHint = if (tracks.isNotEmpty()) " [CC ${tracks.size}]" else ""
 
         if (m3u8 != null) {
-            playlistUtils.extractFromHls(
-                m3u8,
-                videoNameGen = { quality ->
-                    val base = if (displayPrefix == "VOE") "VOE:$quality" else "$displayPrefix - VOE $quality"
-                    base + subHint
-                },
-                subtitleList = tracks,
-            ).let { videoList.addAll(it) }
+            try {
+                val hlsUtils = if (mp4AsFallback) checkedPlaylistUtils else playlistUtils
+                hlsUtils.extractFromHls(
+                    m3u8,
+                    videoNameGen = { quality ->
+                        val base = if (displayPrefix == "VOE") "VOE:$quality" else "$displayPrefix - VOE $quality"
+                        base + subHint
+                    },
+                    subtitleList = tracks,
+                ).let { videoList.addAll(it) }
+            } catch (e: IOException) {
+                if (!mp4AsFallback || mp4.isNullOrBlank()) throw e
+            }
         }
+        if (mp4AsFallback && videoList.isNotEmpty()) return videoList
         if (mp4 != null) {
             val videoHeaders = headers.newBuilder().set("Referer", baseUrl).build()
             val dimensions = mp4Dimensions(mp4, videoHeaders)
