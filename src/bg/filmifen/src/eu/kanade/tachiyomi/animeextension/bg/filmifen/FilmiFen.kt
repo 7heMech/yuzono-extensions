@@ -23,12 +23,14 @@ import keiyoushi.network.get
 import keiyoushi.network.post
 import keiyoushi.network.rateLimit
 import keiyoushi.utils.firstInstanceOrNull
+import keiyoushi.utils.parallelMap
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.io.IOException
 
 class FilmiFen : AnimeHttpSource() {
     override val name = "FilmiFen"
@@ -123,20 +125,26 @@ class FilmiFen : AnimeHttpSource() {
         val page = client.newCall(request).awaitSuccess().use(::catalogueParse)
         // The catalog links to the latest episode. Use the first season's first episode
         // as the library identity so new episodes don't create new series entries.
-        page.animes.filter { it.fetch_type == FetchType.Seasons }.forEach { anime ->
+        page.animes.filter { it.fetch_type == FetchType.Seasons }.parallelMap { anime ->
             val key = seriesKey(anime.url) ?: anime.url
-            anime.url = seriesUrls.get(key) ?: client.get(baseUrl + anime.url).use { response ->
-                val document = response.asJsoup()
-                val firstSeason = document.select(".series-seasons a.series-season")
-                    .minByOrNull { it.selectFirst(".series-season__number")?.text()?.toDoubleOrNull() ?: Double.MAX_VALUE }
-                val firstEpisode = document.select(".series-episodes .series-episode")
-                    .minByOrNull { it.text().toFloat() }
-                val firstUrl = firstSeason?.absUrl("href") ?: firstEpisode?.let {
-                    if (it.hasAttr("href")) it.absUrl("href") else document.location()
+            anime.url = seriesUrls.get(key) ?: try {
+                client.get(baseUrl + anime.url, ensureSuccess = false).use { response ->
+                    if (!response.isSuccessful) return@use anime.url
+                    val document = response.asJsoup()
+                    val firstSeason = document.select(".series-seasons a.series-season")
+                        .minByOrNull { it.selectFirst(".series-season__number")?.text()?.toDoubleOrNull() ?: Double.MAX_VALUE }
+                    val firstEpisode = document.select(".series-episodes .series-episode")
+                        .mapNotNull { element -> element.text().toFloatOrNull()?.let { it to element } }
+                        .minByOrNull { it.first }?.second
+                    val firstUrl = firstSeason?.absUrl("href") ?: firstEpisode?.let {
+                        if (it.hasAttr("href")) it.absUrl("href") else document.location()
+                    }
+                    val path = firstUrl?.let(::articlePath) ?: anime.url
+                    seriesUrls.put(key, path)
+                    path
                 }
-                val path = firstUrl?.let(::articlePath) ?: anime.url
-                seriesUrls.put(key, path)
-                path
+            } catch (_: IOException) {
+                anime.url
             }
         }
         return page
@@ -206,7 +214,7 @@ class FilmiFen : AnimeHttpSource() {
         return navigation.select(".series-episode").map { element ->
             SEpisode.create().apply {
                 url = articlePath(if (element.hasAttr("href")) element.absUrl("href") else document.location())
-                episode_number = element.text().toFloat()
+                episode_number = element.text().toFloatOrNull() ?: 0F
                 name = "Епизод ${element.text()}"
             }
         }.sortedByDescending { it.episode_number }
@@ -253,12 +261,11 @@ class FilmiFen : AnimeHttpSource() {
     }
 
     private fun youtubeQuality(quality: String): String {
-        val codecs = quality.substringAfter(" - ", "").substringBefore(" - ").substringBefore(" ~")
-        return if (codecs.substringBefore(" + ") in listOf("AV1", "VP9", "H.264", "HEVC", "Dolby Vision")) {
-            quality.replaceFirst(" - $codecs", "")
-        } else {
-            quality
-        }
+        val bandwidth = quality.substringAfterLast(" ~", "")
+        val details = quality.substringBeforeLast(" ~").split(" - ").filterNot {
+            it.endsWith(" fps") || it.substringBefore(" + ") in listOf("AV1", "VP9", "H.264", "HEVC", "Dolby Vision")
+        }.joinToString(" - ")
+        return if (bandwidth.isEmpty()) details else "$details ~$bandwidth"
     }
 
     private fun videosFromByse(url: String): List<Video> {

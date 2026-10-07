@@ -5,7 +5,6 @@ import aniyomi.lib.playlistutils.formatCodecs
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import keiyoushi.network.post
-import keiyoushi.utils.formatBytes
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
 import okhttp3.Headers
@@ -110,10 +109,10 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 val dataRate = format.dataRate()?.let { videoRate ->
                     if (adaptive.isEmpty()) videoRate else audioFormats.firstOrNull()?.dataRate()?.plus(videoRate)
                 }
-                val dataUsage = dataRate?.let { " ~${(it * 60L / 8L).formatBytes()}/min" }.orEmpty()
+                val bandwidth = dataRate?.let { " ~%.2f Mbps".format(it / 1_000_000.0) }.orEmpty()
                 Video(
                     videoUrl = format.url!!,
-                    videoTitle = "$prefix - $quality - ${format.codecs()}$fps$dataUsage",
+                    videoTitle = "$prefix - $quality - ${format.codecs()}$fps$bandwidth",
                     resolution = resolution,
                     bitrate = format.bitrate,
                     headers = youtubeHeaders,
@@ -129,6 +128,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
             ).map { video ->
                 if (video.audioTracks.isEmpty()) video.copy(audioTracks = audioTracks) else video
             }.distinctBy { video -> video.videoTitle.substringBeforeLast(" ~") }
+            if (videos.isEmpty()) return@let
             if (preferredCodecs.isEmpty()) return videos
             return videos.groupBy { video ->
                 video.videoTitle.removePrefix("$prefix - ").substringBefore(" - ").substringBefore(" (")

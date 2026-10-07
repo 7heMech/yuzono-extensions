@@ -30,12 +30,11 @@ override suspend fun getVideoList(hoster: Hoster): List<Video> =
 codec in that order and retaining the highest bitrate within it. Omit this
 argument to keep all codec/frame-rate choices.
 
-Stream labels include resolution, codec, frame rate and estimated data usage per
-minute, for example `1080p - AV1 - 24 fps ~15.00 MB/min`. This is a rate, not the
-total video size; 2 Mbps is 15 MB/min. Direct streams use average bitrate when
-available and include the first audio track; estimates are omitted when either
-required rate is unknown. HLS
-uses the advertised combined average bandwidth, falling back to peak bandwidth.
+Stream labels include resolution, codec, frame rate and estimated bandwidth in
+Mbps, for example `1080p - AV1 - 24 fps ~2.00 Mbps`. Direct streams use average
+bitrate when available and include the first audio track; estimates are omitted
+when either required rate is unknown. HLS uses the advertised combined average
+bandwidth, falling back to peak bandwidth.
 Protocol overhead and a different selected audio track can change actual usage.
 Identical choices keep the highest bitrate. The extractor preserves the caller's User-Agent and
 reports YouTube's playback restrictions, including sign-in and bot checks.
