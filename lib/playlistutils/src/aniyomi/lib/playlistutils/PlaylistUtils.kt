@@ -16,7 +16,6 @@ import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.io.File
-import java.util.Locale
 import kotlin.math.abs
 
 class PlaylistUtils(private val client: OkHttpClient, private val headers: Headers = commonEmptyHeaders) {
@@ -251,7 +250,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             val bandwidthFormatted = bandwidth?.let { rate ->
                 if (withDetails) {
                     val averageRate = attributes["AVERAGE-BANDWIDTH"]?.toLongOrNull()?.takeIf { it > 0 } ?: rate
-                    averageRate.takeIf { it > 0 }?.let { "~%.2f Mbps".format(Locale.ROOT, it / 1_000_000.0) }
+                    averageRate.takeIf { it > 0 }?.let { "~%.2f Mbps".format(it / 1_000_000.0) }
                 } else {
                     rate.formatBytes()
                 }

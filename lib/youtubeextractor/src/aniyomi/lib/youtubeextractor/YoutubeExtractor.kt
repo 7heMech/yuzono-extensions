@@ -10,7 +10,6 @@ import keiyoushi.utils.toJsonRequestBody
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
-import java.util.Locale
 import java.util.UUID
 
 /**
@@ -110,7 +109,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 val dataRate = format.dataRate()?.let { videoRate ->
                     if (adaptive.isEmpty()) videoRate else audioFormats.firstOrNull()?.dataRate()?.plus(videoRate)
                 }
-                val bandwidth = dataRate?.let { " ~%.2f Mbps".format(Locale.ROOT, it / 1_000_000.0) }.orEmpty()
+                val bandwidth = dataRate?.let { " ~%.2f Mbps".format(it / 1_000_000.0) }.orEmpty()
                 Video(
                     videoUrl = format.url!!,
                     videoTitle = "$prefix - $quality - ${format.codecs()}$fps$bandwidth",

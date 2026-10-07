@@ -26,7 +26,8 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
 
     private val playlistUtils by lazy { PlaylistUtils(clientDdos, headers) }
 
-    private val checkedPlaylistUtils by lazy {
+    // Fails on a non-playlist response, which PlaylistUtils would otherwise pass on as a single video.
+    private val hlsPlaylistUtils by lazy {
         val playlistClient = clientDdos.newBuilder().addInterceptor { chain ->
             val response = chain.proceed(chain.request())
             try {
@@ -44,8 +45,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
 
     private val redirectRegex = Regex("""window.location.href\s*=\s*'([^']+)';""")
 
-    /** With [mp4AsFallback], the MP4 is only returned when no HLS stream can be extracted. */
-    fun videosFromUrl(url: String, prefix: String = "", mp4AsFallback: Boolean = false): List<Video> {
+    fun videosFromUrl(url: String, prefix: String = ""): List<Video> {
         val videoList = mutableListOf<Video>()
         var document = clientDdos.newCall(GET(url, headers)).execute().asJsoup()
         var baseUrl = url
@@ -89,8 +89,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
 
         if (m3u8 != null) {
             try {
-                val hlsUtils = if (mp4AsFallback) checkedPlaylistUtils else playlistUtils
-                hlsUtils.extractFromHls(
+                hlsPlaylistUtils.extractFromHls(
                     m3u8,
                     videoNameGen = { quality ->
                         val base = if (displayPrefix == "VOE") "VOE:$quality" else "$displayPrefix - VOE $quality"
@@ -99,10 +98,11 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
                     subtitleList = tracks,
                 ).let { videoList.addAll(it) }
             } catch (e: IOException) {
-                if (!mp4AsFallback || mp4.isNullOrBlank()) throw e
+                if (mp4.isNullOrBlank()) throw e
             }
         }
-        if (mp4AsFallback && videoList.isNotEmpty()) return videoList
+        // The MP4 duplicates the top HLS variant, so it is only offered when HLS is unavailable.
+        if (videoList.isNotEmpty()) return videoList
         if (mp4 != null) {
             val videoHeaders = headers.newBuilder().set("Referer", baseUrl).build()
             val dimensions = mp4Dimensions(mp4, videoHeaders)
