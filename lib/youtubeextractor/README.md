@@ -4,6 +4,10 @@ Extracts YouTube HLS, progressive MP4 and adaptive video streams from watch,
 embed, Shorts and youtu.be URLs. HLS audio groups stay paired with their video
 variants; adaptive video streams include separate audio tracks.
 
+Requires extensions-lib 16. HLS extraction uses PlaylistUtils' opt-in
+`extractFromHlsWithDetails`; existing `extractFromHls` callers keep their
+original parsing and labels.
+
 Add `implementation(project(":lib:youtubeextractor"))` to the extension's
 dependencies, then call the suspend API:
 

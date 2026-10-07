@@ -79,12 +79,10 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 Track(format.url!!, "$name (${format.codecs()})")
             }
         streamingData.hlsManifestUrl?.let {
-            return playlistUtils.extractFromHls(
+            return playlistUtils.extractFromHlsWithDetails(
                 it,
                 referer = "https://www.youtube.com/",
                 videoNameGen = { quality -> "$prefix - $quality" },
-                includeCodecs = true,
-                includeBandwidth = false,
             ).map { video ->
                 if (video.audioTracks.isEmpty()) video.copy(audioTracks = audioTracks) else video
             }.distinctBy(Video::videoTitle)

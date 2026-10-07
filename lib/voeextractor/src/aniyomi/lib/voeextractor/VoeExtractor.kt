@@ -87,9 +87,9 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
             val mp4Quality = if (displayPrefix == "VOE") "VOE:MP4 - $resolution" else "$displayPrefix - VOE MP4 - $resolution"
             videoList.add(
                 Video(
+                    url = mp4,
+                    quality = mp4Quality + subHint,
                     videoUrl = mp4,
-                    videoTitle = mp4Quality + subHint,
-                    resolution = dimensions?.second,
                     headers = videoHeaders,
                     subtitleTracks = tracks,
                 ),
