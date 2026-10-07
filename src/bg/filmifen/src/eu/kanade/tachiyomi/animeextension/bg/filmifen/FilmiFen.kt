@@ -238,7 +238,7 @@ class FilmiFen : AnimeHttpSource() {
         "okr" -> okruExtractor.videosFromUrl(hoster.hosterUrl)
         "voe" -> voeExtractor.videosFromUrl(hoster.hosterUrl)
         "fmo" -> videosFromByse(hoster.hosterUrl)
-        TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl)
+        TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl, preferredCodecs = listOf("AV1", "VP9", "H.264"))
         else -> throw UnsupportedOperationException("Неподдържан плеър: ${hoster.hosterName}")
     }.map { video ->
         video.copy(

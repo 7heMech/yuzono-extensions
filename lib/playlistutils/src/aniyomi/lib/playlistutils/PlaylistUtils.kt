@@ -105,7 +105,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
     )
 
     /**
-     * Extracts HLS variants with codec, frame rate and dynamic range labels, omitting bitrate labels.
+     * Extracts HLS variants with codec, frame rate, dynamic range and estimated data usage labels.
      * Unlike [extractFromHls], this opt-in parser matches audio/subtitle groups to each variant,
      * prefers default tracks, handles unordered media attributes and resolves relative URIs.
      * Variants remain sorted by bandwidth so callers can retain the best of otherwise identical streams.
@@ -247,7 +247,14 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             }
             val bandwidth = (if (withDetails) attributes["BANDWIDTH"] else BANDWIDTH_REGEX.find(stream)?.groupValues?.get(1))
                 ?.toLongOrNull()
-            val bandwidthFormatted = bandwidth?.takeUnless { withDetails }?.formatBytes()
+            val bandwidthFormatted = bandwidth?.let { rate ->
+                if (withDetails) {
+                    val averageRate = attributes["AVERAGE-BANDWIDTH"]?.toLongOrNull()?.takeIf { it > 0 } ?: rate
+                    averageRate.takeIf { it > 0 }?.let { "~${(it * 60L / 8L).formatBytes()}/min" }
+                } else {
+                    rate.formatBytes()
+                }
+            }
             val codecName = codec?.takeIf { withDetails }?.let(::formatCodecs)
             val frameRate = attributes["FRAME-RATE"]?.let { "$it fps" }
             val videoRange = attributes["VIDEO-RANGE"]?.takeUnless { it == "SDR" }

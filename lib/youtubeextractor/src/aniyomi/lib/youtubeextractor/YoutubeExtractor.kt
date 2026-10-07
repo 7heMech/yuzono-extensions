@@ -5,6 +5,7 @@ import aniyomi.lib.playlistutils.formatCodecs
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import keiyoushi.network.post
+import keiyoushi.utils.formatBytes
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
 import okhttp3.Headers
@@ -26,7 +27,10 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
     private val playlistUtils = PlaylistUtils(client, youtubeHeaders)
 
     /** Returns codec-labelled streams from a watch, embed, shorts or youtu.be URL. */
-    suspend fun videosFromUrl(url: String, prefix: String = "YouTube"): List<Video> {
+    suspend fun videosFromUrl(url: String, prefix: String = "YouTube"): List<Video> = videosFromUrl(url, prefix, emptyList())
+
+    /** With [preferredCodecs], returns one stream per resolution in codec preference order. */
+    suspend fun videosFromUrl(url: String, prefix: String = "YouTube", preferredCodecs: List<String>): List<Video> {
         val httpUrl = url.toHttpUrl()
         val videoId = httpUrl.queryParameter("v") ?: httpUrl.pathSegments.last { it.isNotEmpty() }
         val context = YoutubeContext(
@@ -70,10 +74,11 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
             "YouTube: ${player.playabilityStatus.reason ?: "Video is unavailable"}"
         }
         val streamingData = player.streamingData ?: error("YouTube: No playable streams found")
-        val audioTracks = streamingData.adaptiveFormats
+        val audioFormats = streamingData.adaptiveFormats
             .filter { it.url != null && it.mimeType.startsWith("audio/") }
             .sortedWith(compareByDescending<YoutubeFormat> { it.audioTrack?.audioIsDefault == true }.thenByDescending { it.bitrate })
             .distinctBy { it.audioTrack?.id to it.codecs() }
+        val audioTracks = audioFormats
             .map { format ->
                 val name = format.audioTrack?.displayName ?: "Audio"
                 Track(format.url!!, "$name (${format.codecs()})")
@@ -88,32 +93,61 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
         val formats = adaptive.ifEmpty {
             streamingData.formats.filter { it.mimeType.startsWith("video/") && it.url != null }
         }
-        val directVideos = formats.sortedWith(compareByDescending<YoutubeFormat> { it.height }.thenByDescending { it.bitrate })
+        val directFormats = formats.sortedWith(compareByDescending<YoutubeFormat> { it.resolution() }.thenByDescending { it.bitrate })
+            .distinctBy { Triple(it.resolution() ?: it.qualityLabel, it.codecs(), it.fps) }
+        val selectedFormats = if (preferredCodecs.isEmpty()) {
+            directFormats
+        } else {
+            directFormats.groupBy { it.resolution() ?: it.qualityLabel }.values.map { variants ->
+                variants.minBy { codecRank(it.codecs(), preferredCodecs) }
+            }
+        }
+        val directVideos = selectedFormats
             .map { format ->
-                val quality = format.height?.let { "${it}p" } ?: format.qualityLabel ?: "Video"
+                val resolution = format.resolution()
+                val quality = resolution?.let { "${it}p" } ?: format.qualityLabel ?: "Video"
                 val fps = format.fps?.let { " - $it fps" }.orEmpty()
+                val dataRate = format.dataRate()?.let { videoRate ->
+                    if (adaptive.isEmpty()) videoRate else audioFormats.firstOrNull()?.dataRate()?.plus(videoRate)
+                }
+                val dataUsage = dataRate?.let { " - ~${(it * 60L / 8L).formatBytes()}/min" }.orEmpty()
                 Video(
                     videoUrl = format.url!!,
-                    videoTitle = "$prefix - $quality - ${format.codecs()}$fps",
-                    resolution = format.height,
+                    videoTitle = "$prefix - $quality - ${format.codecs()}$fps$dataUsage",
+                    resolution = resolution,
                     bitrate = format.bitrate,
                     headers = youtubeHeaders,
                     audioTracks = if (adaptive.isNotEmpty()) audioTracks else emptyList(),
                 )
             }
-            .distinctBy(Video::videoTitle)
         if (directVideos.isNotEmpty()) return directVideos
         streamingData.hlsManifestUrl?.let {
-            return playlistUtils.extractFromHlsWithDetails(
+            val videos = playlistUtils.extractFromHlsWithDetails(
                 it,
                 referer = "https://www.youtube.com/",
                 videoNameGen = { quality -> "$prefix - $quality" },
             ).map { video ->
                 if (video.audioTracks.isEmpty()) video.copy(audioTracks = audioTracks) else video
-            }.distinctBy(Video::videoTitle)
+            }.distinctBy { video -> video.videoTitle.substringBeforeLast(" - ~") }
+            if (preferredCodecs.isEmpty()) return videos
+            return videos.groupBy { video ->
+                video.videoTitle.removePrefix("$prefix - ").substringBefore(" - ").substringBefore(" (")
+            }.entries.sortedByDescending { it.key.removeSuffix("p").toIntOrNull() }.map { (_, variants) ->
+                variants.minBy { video ->
+                    val codecs = video.videoTitle.removePrefix("$prefix - ").substringAfter(" - ").substringBefore(" - ")
+                    codecRank(codecs, preferredCodecs)
+                }
+            }
         }
         error("YouTube: No playable streams found")
     }
+
+    private fun codecRank(codecs: String, preferredCodecs: List<String>): Int = preferredCodecs.indexOf(codecs.substringBefore(" + "))
+        .takeIf { it >= 0 } ?: Int.MAX_VALUE
+
+    private fun YoutubeFormat.resolution(): Int? = height ?: qualityLabel?.substringBefore('p')?.toIntOrNull()
+
+    private fun YoutubeFormat.dataRate(): Long? = averageBitrate?.takeIf { it > 0 } ?: bitrate?.toLong()?.takeIf { it > 0 }
 
     private fun YoutubeFormat.codecs(): String = formatCodecs(mimeType.substringAfter("codecs=\"", "").substringBefore('"'))
         .ifEmpty { mimeType.substringBefore(';').substringAfter('/') }

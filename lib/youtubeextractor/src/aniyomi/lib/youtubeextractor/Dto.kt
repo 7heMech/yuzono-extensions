@@ -47,6 +47,7 @@ internal class YoutubeFormat(
     val height: Int? = null,
     val fps: Int? = null,
     val bitrate: Int? = null,
+    val averageBitrate: Long? = null,
     val audioTrack: YoutubeAudioTrack? = null,
 )
 

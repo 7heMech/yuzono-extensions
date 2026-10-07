@@ -20,11 +20,22 @@ dependencies, then call the suspend API:
 private val youtubeExtractor by lazy { YoutubeExtractor(client, headers) }
 
 override suspend fun getVideoList(hoster: Hoster): List<Video> =
-    youtubeExtractor.videosFromUrl(hoster.hosterUrl)
+    youtubeExtractor.videosFromUrl(
+        hoster.hosterUrl,
+        preferredCodecs = listOf("AV1", "VP9", "H.264"),
+    )
 ```
 
-Stream labels include resolution, codec and frame rate. Identical choices keep
-the highest bitrate. The extractor preserves the caller's User-Agent and
+`preferredCodecs` keeps one choice per resolution, selecting the first available
+codec in that order and retaining the highest bitrate within it. Omit this
+argument to keep all codec/frame-rate choices.
+
+Stream labels include resolution, codec, frame rate and estimated data usage in
+MB/min. Direct streams use average bitrate when available and include the first
+audio track; estimates are omitted when either required rate is unknown. HLS
+uses the advertised combined average bandwidth, falling back to peak bandwidth.
+Protocol overhead and a different selected audio track can change actual usage.
+Identical choices keep the highest bitrate. The extractor preserves the caller's User-Agent and
 reports YouTube's playback restrictions, including sign-in and bot checks.
 
 The `VISIONOS` visitor/player request flow is based on
