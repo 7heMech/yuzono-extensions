@@ -1,10 +1,11 @@
 package aniyomi.lib.youtubeextractor
 
-import aniyomi.lib.playlistutils.PlaylistUtils
-import aniyomi.lib.playlistutils.formatCodecs
 import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.await
 import keiyoushi.network.post
+import keiyoushi.utils.bodyString
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonRequestBody
 import okhttp3.Headers
@@ -23,7 +24,10 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
         .set("Referer", "https://www.youtube.com/")
         .set("X-Goog-Api-Format-Version", "2")
         .build()
-    private val playlistUtils = PlaylistUtils(client, youtubeHeaders)
+    private val hlsHeaders = youtubeHeaders.newBuilder()
+        .set("Accept", "*/*")
+        .set("Origin", "https://www.youtube.com")
+        .build()
 
     /** Returns codec-labelled streams from a watch, embed, shorts or youtu.be URL. */
     suspend fun videosFromUrl(url: String, prefix: String = "YouTube"): List<Video> = videosFromUrl(url, prefix, emptyList())
@@ -121,11 +125,8 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
             }
         if (directVideos.isNotEmpty()) return directVideos
         streamingData.hlsManifestUrl?.let {
-            val videos = playlistUtils.extractFromHlsWithDetails(
-                it,
-                referer = "https://www.youtube.com/",
-                videoNameGen = { quality -> "$prefix - $quality" },
-            ).map { video ->
+            val masterPlaylist = client.newCall(GET(it, hlsHeaders)).await().bodyString()
+            val videos = parseHlsVariants(it, masterPlaylist, hlsHeaders) { quality -> "$prefix - $quality" }.map { video ->
                 if (video.audioTracks.isEmpty()) video.copy(audioTracks = audioTracks) else video
             }.distinctBy { video -> video.videoTitle.substringBeforeLast(" ~") }
             if (videos.isEmpty()) return@let
