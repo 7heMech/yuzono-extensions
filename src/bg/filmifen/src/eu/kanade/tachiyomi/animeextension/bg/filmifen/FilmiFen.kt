@@ -241,14 +241,24 @@ class FilmiFen : AnimeHttpSource() {
         TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl, preferredCodecs = listOf("AV1", "VP9", "H.264"))
         else -> throw UnsupportedOperationException("Неподдържан плеър: ${hoster.hosterName}")
     }.map { video ->
+        val quality = video.videoTitle
+            .removePrefix("YouTube - ")
+            .removePrefix("VDN - ")
+            .removePrefix("BSE - ")
+            .removePrefix("Okru:")
+            .removePrefix("VOE:")
         video.copy(
-            videoTitle = video.videoTitle
-                .removePrefix("YouTube - ")
-                .removePrefix("VDN - ")
-                .removePrefix("BSE - ")
-                .removePrefix("Okru:")
-                .removePrefix("VOE:"),
+            videoTitle = if (hoster.internalData == TRAILER_KEY) youtubeQuality(quality) else quality,
         )
+    }
+
+    private fun youtubeQuality(quality: String): String {
+        val codecs = quality.substringAfter(" - ", "").substringBefore(" - ").substringBefore(" ~")
+        return if (codecs.substringBefore(" + ") in listOf("AV1", "VP9", "H.264", "HEVC", "Dolby Vision")) {
+            quality.replaceFirst(" - $codecs", "")
+        } else {
+            quality
+        }
     }
 
     private fun videosFromByse(url: String): List<Video> {
