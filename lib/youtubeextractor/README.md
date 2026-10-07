@@ -4,6 +4,11 @@ Extracts YouTube HLS, progressive MP4 and adaptive video streams from watch,
 embed, Shorts and youtu.be URLs. HLS audio groups stay paired with their video
 variants; adaptive video streams include separate audio tracks.
 
+Direct adaptive video with audio is preferred, followed by progressive MP4,
+then HLS. Direct streams avoid the packed HLS audio timestamp metadata that
+triggers a JSON escaping bug in mpv-android's track-list conversion. HLS-only
+responses still require that player bug to be fixed in the app.
+
 Requires extensions-lib 16. HLS extraction uses PlaylistUtils' opt-in
 `extractFromHlsWithDetails`; existing `extractFromHls` callers keep their
 original parsing and labels.
