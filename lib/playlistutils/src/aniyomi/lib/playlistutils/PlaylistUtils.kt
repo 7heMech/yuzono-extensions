@@ -258,9 +258,10 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             val codecName = codec?.takeIf { withDetails }?.let(::formatCodecs)
             val frameRate = attributes["FRAME-RATE"]?.let { "$it fps" }
             val videoRange = attributes["VIDEO-RANGE"]?.takeUnless { it == "SDR" }
-            val streamName = listOfNotNull(resolution, codecName, frameRate, videoRange, bandwidthFormatted).joinToString(" - ")
+            val streamName = listOfNotNull(resolution, codecName, frameRate, videoRange, bandwidthFormatted?.takeUnless { withDetails }).joinToString(" - ")
                 .takeIf { it.isNotBlank() }
                 ?: "Video"
+            val streamLabel = if (withDetails && bandwidthFormatted != null) "$streamName $bandwidthFormatted" else streamName
 
             val videoUrl = if (withDetails) {
                 val uri = stream.lineSequence().drop(1).map(String::trim).firstOrNull { it.isNotEmpty() && !it.startsWith('#') }
@@ -277,7 +278,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             // Keep the legacy constructor: existing PlaylistUtils callers still support extensions-lib 14.
             bandwidth to Video(
                 url = videoUrl,
-                quality = videoNameGen(streamName),
+                quality = videoNameGen(streamLabel),
                 videoUrl = videoUrl,
                 headers = videoHeadersGen(headers, referer, videoUrl),
                 subtitleTracks = streamSubtitles,

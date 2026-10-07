@@ -110,7 +110,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 val dataRate = format.dataRate()?.let { videoRate ->
                     if (adaptive.isEmpty()) videoRate else audioFormats.firstOrNull()?.dataRate()?.plus(videoRate)
                 }
-                val dataUsage = dataRate?.let { " - ~${(it * 60L / 8L).formatBytes()}/min" }.orEmpty()
+                val dataUsage = dataRate?.let { " ~${(it * 60L / 8L).formatBytes()}/min" }.orEmpty()
                 Video(
                     videoUrl = format.url!!,
                     videoTitle = "$prefix - $quality - ${format.codecs()}$fps$dataUsage",
@@ -128,13 +128,13 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 videoNameGen = { quality -> "$prefix - $quality" },
             ).map { video ->
                 if (video.audioTracks.isEmpty()) video.copy(audioTracks = audioTracks) else video
-            }.distinctBy { video -> video.videoTitle.substringBeforeLast(" - ~") }
+            }.distinctBy { video -> video.videoTitle.substringBeforeLast(" ~") }
             if (preferredCodecs.isEmpty()) return videos
             return videos.groupBy { video ->
                 video.videoTitle.removePrefix("$prefix - ").substringBefore(" - ").substringBefore(" (")
             }.entries.sortedByDescending { it.key.removeSuffix("p").toIntOrNull() }.map { (_, variants) ->
                 variants.minBy { video ->
-                    val codecs = video.videoTitle.removePrefix("$prefix - ").substringAfter(" - ").substringBefore(" - ")
+                    val codecs = video.videoTitle.substringBeforeLast(" ~").removePrefix("$prefix - ").substringAfter(" - ").substringBefore(" - ")
                     codecRank(codecs, preferredCodecs)
                 }
             }
