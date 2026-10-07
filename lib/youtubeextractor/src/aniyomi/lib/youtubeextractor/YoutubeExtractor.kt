@@ -24,6 +24,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
         .set("X-Goog-Api-Format-Version", "2")
         .build()
     private val playlistUtils = PlaylistUtils(client, youtubeHeaders)
+    private val hexEscapeRegex = Regex("""\\(?:\\|x([0-9a-fA-F]{2}))""")
 
     /** Returns codec-labelled streams from a watch, embed, shorts or youtu.be URL. */
     suspend fun videosFromUrl(url: String, prefix: String = "YouTube"): List<Video> {
@@ -49,7 +50,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
             "https://www.youtube.com/youtubei/v1/visitor_id?prettyPrint=false",
             youtubeHeaders,
             YoutubeVisitorRequest(context).toJsonRequestBody(),
-        ).parseAs<YoutubeVisitorResponse>().responseContext.visitorData
+        ).parseAs<YoutubeVisitorResponse>(transform = ::normalizeHexEscapes).responseContext.visitorData
         val playerUrl = "https://youtubei.googleapis.com/youtubei/v1/player".toHttpUrl().newBuilder()
             .addQueryParameter("prettyPrint", "false")
             .addQueryParameter("t", UUID.randomUUID().toString().replace("-", "").take(12))
@@ -65,7 +66,7 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
                 contentCheckOk = true,
                 racyCheckOk = true,
             ).toJsonRequestBody(),
-        ).parseAs<YoutubePlayerResponse>()
+        ).parseAs<YoutubePlayerResponse>(transform = ::normalizeHexEscapes)
         check(player.playabilityStatus.status == "OK") {
             "YouTube: ${player.playabilityStatus.reason ?: "Video is unavailable"}"
         }
@@ -107,6 +108,13 @@ class YoutubeExtractor(private val client: OkHttpClient, headers: Headers = Head
             }
             .distinctBy(Video::videoTitle)
             .also { check(it.isNotEmpty()) { "YouTube: No playable streams found" } }
+    }
+
+    // Convert JavaScript \xNN escapes to JSON \u00NN; paired backslashes stay literal.
+    // https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/utils/_utils.py (js_to_json)
+    private fun normalizeHexEscapes(body: String): String = hexEscapeRegex.replace(body) { match ->
+        val hex = match.groupValues[1]
+        if (hex.isEmpty()) match.value else "\\u00$hex"
     }
 
     private fun YoutubeFormat.codecs(): String = formatCodecs(mimeType.substringAfter("codecs=\"", "").substringBefore('"'))
