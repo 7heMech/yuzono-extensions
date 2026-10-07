@@ -240,6 +240,15 @@ class FilmiFen : AnimeHttpSource() {
         "fmo" -> videosFromByse(hoster.hosterUrl)
         TRAILER_KEY -> youtubeExtractor.videosFromUrl(hoster.hosterUrl)
         else -> throw UnsupportedOperationException("Неподдържан плеър: ${hoster.hosterName}")
+    }.map { video ->
+        video.copy(
+            videoTitle = video.videoTitle
+                .removePrefix("YouTube - ")
+                .removePrefix("VDN - ")
+                .removePrefix("BSE - ")
+                .removePrefix("Okru:")
+                .removePrefix("VOE:"),
+        )
     }
 
     private fun videosFromByse(url: String): List<Video> {
