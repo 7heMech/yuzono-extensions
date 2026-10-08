@@ -17,7 +17,6 @@ import okhttp3.Headers
 import okhttp3.OkHttpClient
 import uy.kohesive.injekt.injectLazy
 import java.io.IOException
-import kotlin.math.abs
 
 class VoeExtractor(private val client: OkHttpClient, private val headers: Headers) {
 
@@ -107,7 +106,7 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
         if (mp4 != null) {
             val videoHeaders = headers.newBuilder().set("Referer", baseUrl).build()
             val dimensions = mp4Dimensions(mp4, videoHeaders)
-            val resolution = dimensions?.let { (width, height) -> "${standardQuality(height)} (${width}x$height)" }
+            val resolution = dimensions?.let { (width, height) -> "${playlistUtils.standardQuality(height.toString())} (${width}x$height)" }
                 ?: "Unknown quality"
             val mp4Quality = if (displayPrefix == "VOE") "VOE:MP4 - $resolution" else "$displayPrefix - VOE MP4 - $resolution"
             videoList.add(
@@ -137,10 +136,6 @@ class VoeExtractor(private val client: OkHttpClient, private val headers: Header
             retriever.release()
         }
     }
-
-    private val standardQualities = listOf(144, 240, 360, 480, 720, 1080, 1440, 2160)
-
-    private fun standardQuality(height: Int): String = "${standardQualities.minBy { abs(it - height) }}p"
 
     private fun decryptF7(p8: String): JsonObject? = try {
         val vF = rot13(p8)

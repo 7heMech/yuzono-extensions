@@ -6,14 +6,12 @@ import eu.kanade.tachiyomi.animesource.model.Track
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
-import keiyoushi.utils.UrlUtils
 import keiyoushi.utils.bodyString
 import keiyoushi.utils.commonEmptyHeaders
 import keiyoushi.utils.parallelMapNotNullBlocking
 import keiyoushi.utils.useAsJsoup
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import java.io.File
 import kotlin.math.abs
@@ -45,7 +43,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         subtitleList: List<Track> = emptyList(),
         audioList: List<Track> = emptyList(),
         toStandardQuality: (String) -> String = { quality ->
-            stnQuality(quality)
+            standardQuality(quality)
         },
     ): List<Video> = extractFromHls(
         playlistUrl,
@@ -90,7 +88,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         subtitleList: List<Track> = emptyList(),
         audioList: List<Track> = emptyList(),
         toStandardQuality: (String) -> String = { quality ->
-            stnQuality(quality)
+            standardQuality(quality)
         },
     ): List<Video> {
         val masterHeaders = masterHeadersGen(headers, referer)
@@ -98,9 +96,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         val masterPlaylist = client.newCall(GET(playlistUrl, masterHeaders))
             .execute().bodyString()
 
-        // Check if there isn't multiple streams available
-        if (PLAYLIST_SEPARATOR !in masterPlaylist) {
-            return listOf(
+        val variants = parseHlsMasterPlaylist(playlistUrl, masterPlaylist)
+            ?: return listOf(
                 Video(
                     playlistUrl,
                     videoNameGen("Video"),
@@ -110,41 +107,9 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                     audioTracks = audioList,
                 ),
             )
-        }
-
-        val mediaTracks = masterPlaylist.lineSequence()
-            .map(String::trim)
-            .filter { it.startsWith(MEDIA_TAG) }
-            .map { it.substringAfter(':').hlsAttributes() }
-            .toList()
-        val variants = masterPlaylist.substringAfter(PLAYLIST_SEPARATOR).split(PLAYLIST_SEPARATOR)
-            .map { stream -> stream to stream.substringBefore('\n').hlsAttributes() }
 
         /*
-         * A variant only plays the renditions of the group named by its AUDIO/SUBTITLES attribute.
-         * Variants without a known group, and renditions of groups no variant references, keep the
-         * previous behaviour of offering every rendition of that type.
-         */
-        fun playlistTracks(type: String, group: String?): List<Track> {
-            val renditions = mediaTracks.filter { it["TYPE"] == type }
-            val referencedGroups = variants.mapNotNullTo(mutableSetOf()) { (_, attributes) -> attributes[type] }
-            val grouped = renditions.filter { group != null && it["GROUP-ID"] == group }
-            val selected = if (grouped.isEmpty()) {
-                renditions
-            } else {
-                renditions.filter { it in grouped || it["GROUP-ID"] !in referencedGroups }
-            }
-            return selected.mapNotNull { attributes ->
-                val uri = attributes["URI"] ?: return@mapNotNull null
-                Track(
-                    resolveUri(uri, playlistUrl) ?: return@mapNotNull null,
-                    attributes["NAME"] ?: attributes["LANGUAGE"] ?: return@mapNotNull null,
-                )
-            }.distinctBy(Track::url)
-        }
-
-        /*
-         * Stream might have multiple sub-streams separated by [PLAYLIST_SEPARATOR]. Template:
+         * A master playlist lists its variants after `#EXT-X-STREAM-INF` tags. Template:
          *
          * #EXTM3U
          * #EXT-X-STREAM-INF:BANDWIDTH=150000,RESOLUTION=416x234,CODECS="avc1.42e00a,mp4a.40.2"
@@ -172,14 +137,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
          * https://vixcloud.co/playlist/274438?type=video&rendition=1080p&token=xEfP4QUI9tG-E6whlvwsig&expires=1752746791&edge=sc-u13-01
          *
          */
-        return variants.mapNotNull { (stream, attributes) ->
-            val codec = attributes["CODECS"]
-            if (!codec.isNullOrBlank()) {
-                // Skip audio only streams.
-                val codecs = codec.split(',')
-                if (codecs.all { it.trim().substringBefore('.') in AUDIO_CODECS }) return@mapNotNull null
-            }
-
+        return variants.map { variant ->
+            val attributes = variant.attributes
             val resolution = attributes["RESOLUTION"]
                 ?.let { resolution ->
                     val standardQuality = QUALITY_REGEX.find(resolution)
@@ -202,37 +161,21 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
                 .takeIf { it.isNotBlank() }
                 ?: "Video"
 
-            val videoUrl = stream.lineSequence().drop(1)
-                .map(String::trim)
-                .firstOrNull { it.isNotEmpty() && !it.startsWith('#') }
-                ?.let { resolveUri(it, playlistUrl) }
-                ?: return@mapNotNull null
+            val videoUrl = variant.url
 
             bandwidth to Video(
                 url = videoUrl,
                 quality = videoNameGen(streamName),
                 videoUrl = videoUrl,
                 headers = videoHeadersGen(headers, referer, videoUrl),
-                subtitleTracks = subtitleList + playlistTracks("SUBTITLES", attributes["SUBTITLES"]),
-                audioTracks = audioList + playlistTracks("AUDIO", attributes["AUDIO"]),
+                subtitleTracks = subtitleList + variant.subtitleTracks,
+                audioTracks = audioList + variant.audioTracks,
             )
         }
             .sortedByDescending { (bandwidth, _) ->
                 bandwidth ?: 0L
             }
             .map { (_, video) -> video }
-    }
-
-    /** Parses an HLS attribute list, which may be in any order and contain quoted commas. */
-    private fun String.hlsAttributes(): Map<String, String> = HLS_ATTRIBUTE_REGEX.findAll(this).associate {
-        it.groupValues[1] to (it.groups[2]?.value ?: it.groupValues[3].trim())
-    }
-
-    /** Keeps absolute URLs byte-for-byte, so signed URLs are never re-encoded. */
-    private fun resolveUri(uri: String, playlistUrl: String): String? = when {
-        uri.startsWith("https://", ignoreCase = true) || uri.startsWith("http://", ignoreCase = true) -> uri
-        uri.startsWith("//") -> "https:$uri"
-        else -> playlistUrl.toHttpUrlOrNull()?.resolve(uri)?.toString() ?: UrlUtils.fixUrl(uri, playlistUrl)
     }
 
     fun generateMasterHeaders(baseHeaders: Headers, referer: String): Headers = baseHeaders.newBuilder().apply {
@@ -269,12 +212,12 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         subtitleList: List<Track> = emptyList(),
         audioList: List<Track> = emptyList(),
         toStandardQuality: (String) -> String = { quality ->
-            stnQuality(quality)
+            standardQuality(quality)
         },
     ): List<Video> = extractFromDash(
         mpdUrl,
         { videoRes, bandwidth ->
-            videoNameGen(videoRes) + " - ${bandwidth.toLongOrNull()?.formatBitrate() ?: ""}"
+            listOfNotNull(videoNameGen(videoRes), bandwidth.toLongOrNull()?.formatBitrate()?.takeIf(String::isNotEmpty)).joinToString(" - ")
         },
         referer,
         { _, _ -> mpdHeaders },
@@ -316,12 +259,12 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         subtitleList: List<Track> = emptyList(),
         audioList: List<Track> = emptyList(),
         toStandardQuality: (String) -> String = { quality ->
-            stnQuality(quality)
+            standardQuality(quality)
         },
     ): List<Video> = extractFromDash(
         mpdUrl,
         { videoRes, bandwidth ->
-            videoNameGen(videoRes) + " - ${bandwidth.toLongOrNull()?.formatBitrate() ?: ""}"
+            listOfNotNull(videoNameGen(videoRes), bandwidth.toLongOrNull()?.formatBitrate()?.takeIf(String::isNotEmpty)).joinToString(" - ")
         },
         referer,
         mpdHeadersGen,
@@ -365,7 +308,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         subtitleList: List<Track> = emptyList(),
         audioList: List<Track> = emptyList(),
         toStandardQuality: (String) -> String = { quality ->
-            stnQuality(quality)
+            standardQuality(quality)
         },
     ): List<Video> {
         val mpdHeaders = mpdHeadersGen(headers, referer)
@@ -413,7 +356,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         else -> ""
     }
 
-    private fun stnQuality(quality: String): String {
+    /** Returns the closest standard resolution label, such as `720p`, for a pixel height. */
+    fun standardQuality(quality: String): String {
         val intQuality = quality.trim().toIntOrNull() ?: return quality
         val result = STANDARD_QUALITIES.minByOrNull { abs(it - intQuality) } ?: intQuality
         return "${result}p"
@@ -522,14 +466,7 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             Regex("""^\d+[ \t]*\n(?=(?:\d{1,3}:)?\d{1,3}:\d{2}\.\d{1,3}[ \t]*-->)""", RegexOption.MULTILINE)
         }
 
-        private const val PLAYLIST_SEPARATOR = "#EXT-X-STREAM-INF:"
-
-        private const val MEDIA_TAG = "#EXT-X-MEDIA:"
-
-        private val HLS_ATTRIBUTE_REGEX by lazy { Regex("""([A-Z0-9-]+)=(?:"([^"]*)"|([^,\r\n]*))""") }
         private val QUALITY_REGEX by lazy { Regex("""[xX](\d+)""") }
-
-        private val AUDIO_CODECS = setOf("mp4a", "opus", "vorbis", "ac-3", "ec-3", "flac", "alac")
 
         private val STANDARD_QUALITIES = listOf(144, 240, 360, 480, 720, 1080, 1440, 2160)
     }
