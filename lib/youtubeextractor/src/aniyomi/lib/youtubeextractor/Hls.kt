@@ -6,22 +6,19 @@ import okhttp3.Headers
 
 /**
  * Labels HLS variants with codec, frame rate, dynamic range and estimated bandwidth.
- * Variants are sorted by peak bandwidth so callers can retain the best of otherwise identical streams.
+ * Variants are sorted by the labelled rate so callers can retain the best of otherwise identical streams.
  */
 internal fun List<HlsVariant>.toDetailedVideos(
     headers: Headers,
     standardQuality: (String) -> String,
     videoNameGen: (String) -> String,
-): List<Video> = sortedByDescending { it.attributes["BANDWIDTH"]?.toLongOrNull() ?: 0L }.map { variant ->
+): List<Video> = sortedByDescending { it.attributes.dataRate() ?: 0L }.map { variant ->
     val attributes = variant.attributes
     val resolution = attributes["RESOLUTION"]?.let { resolution ->
         val height = QUALITY_REGEX.find(resolution)?.groupValues?.get(1)?.let(standardQuality)
         if (!height.isNullOrBlank()) "$height ($resolution)" else resolution
     }
-    val bandwidth = attributes["BANDWIDTH"]?.toLongOrNull()?.let { rate ->
-        val averageRate = attributes["AVERAGE-BANDWIDTH"]?.toLongOrNull()?.takeIf { it > 0 } ?: rate
-        averageRate.takeIf { it > 0 }?.let { "~%.2f Mbps".format(it / 1_000_000.0) }
-    }
+    val bandwidth = attributes.dataRate()?.takeIf { it > 0 }?.let { "~%.2f Mbps".format(it / 1_000_000.0) }
     val streamName = listOfNotNull(
         resolution,
         attributes["CODECS"]?.let(::formatCodecs),
@@ -56,5 +53,8 @@ internal fun formatCodecs(codecs: String): String = codecs.split(',').map { code
         else -> codec.trim()
     }
 }.distinct().joinToString(" + ")
+
+/** Returns the average rate when the playlist provides one, otherwise the peak BANDWIDTH. */
+private fun Map<String, String>.dataRate(): Long? = this["AVERAGE-BANDWIDTH"]?.toLongOrNull()?.takeIf { it > 0 } ?: this["BANDWIDTH"]?.toLongOrNull()
 
 private val QUALITY_REGEX = Regex("""[xX](\d+)""")

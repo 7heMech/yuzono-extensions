@@ -90,7 +90,6 @@ private fun String.hlsAttributes(): Map<String, String> = HLS_ATTRIBUTE_REGEX.fi
 
 private fun resolveHlsUri(uri: String, playlistUrl: String): String? = when {
     uri.startsWith("https://", ignoreCase = true) || uri.startsWith("http://", ignoreCase = true) -> uri
-    uri.startsWith("//") -> "https:$uri"
     else -> playlistUrl.toHttpUrlOrNull()?.resolve(uri)?.toString() ?: UrlUtils.fixUrl(uri, playlistUrl)
 }
 
