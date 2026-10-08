@@ -86,7 +86,9 @@ private fun renditionTracks(
     val all = ofType.toTracks()
     val byGroup = ofType.mapNotNullTo(mutableSetOf()) { it["GROUP-ID"] }
         .filter { it in referenced }
-        .associateWith { group -> ofType.filter { it["GROUP-ID"] == group || it["GROUP-ID"] !in referenced }.toTracks() }
+        .associateWith { group ->
+            (ofType.filter { it["GROUP-ID"] == group } + ofType.filter { it["GROUP-ID"] !in referenced }).toTracks()
+        }
     return { group -> group?.let(byGroup::get) ?: all }
 }
 
