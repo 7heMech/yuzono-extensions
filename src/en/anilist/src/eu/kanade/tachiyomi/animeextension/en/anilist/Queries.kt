@@ -118,23 +118,15 @@ query media(%id: Int, %type: MediaType) {
 }
 """.toQuery()
 
-fun getEpisodeQuery() = """
-query media(%id: Int, %type: MediaType) {
-  Media(id: %id, type: %type) {
+fun getEpisodeQuery() = $$"""
+query media($id: Int, $type: MediaType) {
+  Media(id: $id, type: $type) {
+    idMal
+    status
     episodes
     nextAiringEpisode {
       episode
     }
   }
 }
-""".toQuery()
-
-fun getMalIdQuery() = """
-query media(%id: Int, %type: MediaType) {
-  Media(id: %id, type: %type) {
-    idMal
-    id
-    status
-  }
-}
-""".toQuery()
+""".trimIndent()

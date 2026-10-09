@@ -218,6 +218,8 @@ class AniListEpisodeResponse(
     ) {
         @Serializable
         class MediaObject(
+            val status: String,
+            val idMal: Int? = null,
             val episodes: Int? = null,
             val nextAiringEpisode: NextAiringObject? = null,
         ) {
@@ -226,23 +228,6 @@ class AniListEpisodeResponse(
                 val episode: Int,
             )
         }
-    }
-}
-
-@Serializable
-class AnilistToMalResponse(
-    val data: DataObject,
-) {
-    @Serializable
-    class DataObject(
-        @SerialName("Media") val media: MediaObject,
-    ) {
-        @Serializable
-        class MediaObject(
-            val id: Int,
-            val status: String,
-            val idMal: Int? = null,
-        )
     }
 }
 
