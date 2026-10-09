@@ -68,7 +68,7 @@ class AniList :
     override val client = network.client.newBuilder()
         .addInterceptor(::authInterceptor)
         .addInterceptor(::rateLimitBackoffInterceptor)
-        .rateLimit(85, 1.minutes, 700.milliseconds) { it.host == "graphql.anilist.co" }
+        .rateLimit(25, 1.minutes, 2400.milliseconds) { it.host == "graphql.anilist.co" }
         .rateLimit(1, 1.seconds) {
             it.host == "api.tenrai.org" ||
                 it.host == "api.jikan.moe" ||
