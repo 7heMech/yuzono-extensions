@@ -218,7 +218,7 @@ class AniListEpisodeResponse(
     ) {
         @Serializable
         class MediaObject(
-            val status: String,
+            val status: String? = null,
             val idMal: Int? = null,
             val episodes: Int? = null,
             val nextAiringEpisode: NextAiringObject? = null,
