@@ -80,7 +80,6 @@ object Filters {
 
     val FILTER_LIST get() = AnimeFilterList(
         AniListListFilter(),
-        AnimeFilter.Header(""),
         GenreFilter(),
         YearFilter(),
         SeasonFilter(),

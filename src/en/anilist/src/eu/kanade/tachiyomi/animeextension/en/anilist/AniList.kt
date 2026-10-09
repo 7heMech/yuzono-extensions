@@ -61,6 +61,8 @@ class AniList :
 
     override val supportsLatest = true
 
+    override val disableRelatedAnimesBySearch = true
+
     override fun headersBuilder() = super.headersBuilder()
         .set("Referer", "$baseUrl/")
         .set("Origin", baseUrl)
