@@ -1,0 +1,66 @@
+name: HentaiHaven pre-DASH reproduction
+
+on:
+  push:
+    branches:
+      - ci/hentaihaven-pre-dash-6d4b0d2c
+    paths:
+      - .github/workflows/hentaihaven-pre-dash.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact pre-DASH source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 6d4b0d2c639182e6c3a80e1fef72c64504bb0563
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          java-version: 25
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+        with:
+          cache-read-only: true
+
+      - name: Record provenance and narrow extension configuration
+        run: |
+          test "$(git rev-parse HEAD)" = 6d4b0d2c639182e6c3a80e1fef72c64504bb0563
+          mkdir -p artifact
+          git show -s --format=fuller HEAD > artifact/SOURCE.txt
+          cp src/en/hentaihaven/build.gradle artifact/build.gradle.txt
+          cp src/en/hentaihaven/src/eu/kanade/tachiyomi/animeextension/en/hentaihaven/extractors/OctopusExtractor.kt artifact/OctopusExtractor.kt.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          settings = Path('settings.gradle.kts')
+          text = settings.read_text()
+          before = 'loadAllIndividualExtensions()\n'
+          assert text.count(before) == 1
+          settings.write_text(text.replace(before, 'loadIndividualExtension("en", "hentaihaven")\n'))
+          PY
+
+      - name: Build HentaiHaven only
+        run: ./gradlew :src:en:hentaihaven:assembleDebug --no-daemon
+
+      - name: Collect APK and checksum
+        run: |
+          cp src/en/hentaihaven/build/outputs/apk/debug/*.apk artifact/
+          cd artifact
+          sha256sum *.apk > SHA256SUMS
+
+      - name: Upload pre-DASH APK and provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: hentaihaven-16.8-pre-dash-6d4b0d2c
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
