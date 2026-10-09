@@ -133,12 +133,15 @@ class DailymotionExtractor(private val client: OkHttpClient, private val headers
         // Serve each video/audio pair as DASH, keeping the default audio first and all renditions selectable.
         if (parsed.isFmp4) {
             return videos.flatMap { video ->
-                val audios = video.audioTracks.ifEmpty { listOf(null) }
+                // Without a separate audio rendition, keep HLS so any embedded audio is preserved.
+                if (video.audioTracks.isEmpty()) return@flatMap listOf(video)
+
+                val audios = video.audioTracks
                 audios.map { audio ->
-                    val dashUrl = HlsDashServer.register(client, masterHeaders, video.videoUrl, audio?.url)
+                    val dashUrl = HlsDashServer.register(client, masterHeaders, video.videoUrl, audio.url)
                     Video(
                         videoUrl = dashUrl,
-                        videoTitle = video.videoTitle + if (audios.size > 1) " - ${audio?.lang}" else "",
+                        videoTitle = video.videoTitle + if (audios.size > 1) " - ${audio.lang}" else "",
                         headers = masterHeaders,
                         subtitleTracks = video.subtitleTracks,
                     )
