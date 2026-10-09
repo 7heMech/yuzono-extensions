@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.animeextension.en.anilist
 
 import android.content.SharedPreferences
 import android.util.Log
+import android.util.LruCache
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
@@ -14,14 +15,17 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
+import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.graphQLPost
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.parseGraphQLAs
 import keiyoushi.utils.tryParse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Interceptor
@@ -57,6 +61,8 @@ class AniList :
 
     override val supportsLatest = true
 
+    override val disableRelatedAnimesBySearch = true
+
     override fun headersBuilder() = super.headersBuilder()
         .set("Referer", "$baseUrl/")
         .set("Origin", baseUrl)
@@ -64,7 +70,7 @@ class AniList :
     override val client = network.client.newBuilder()
         .addInterceptor(::authInterceptor)
         .addInterceptor(::rateLimitBackoffInterceptor)
-        .rateLimit(85, 1.minutes, 700.milliseconds) { it.host == "graphql.anilist.co" }
+        .rateLimit(25, 1.minutes, 2400.milliseconds) { it.host == "graphql.anilist.co" }
         .rateLimit(1, 1.seconds) {
             it.host == "api.tenrai.org" ||
                 it.host == "api.jikan.moe" ||
@@ -77,16 +83,17 @@ class AniList :
     @Volatile
     private var cachedMappings: List<Mapping>? = null
 
-    private fun getMappings(): List<Mapping> {
+    private val mappingsMutex = Mutex()
+
+    private suspend fun getMappings(): List<Mapping> = mappingsMutex.withLock {
         cachedMappings?.let { return it }
 
-        return try {
-            client.newCall(
-                GET("https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-mini.json", headers),
-            ).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+        try {
+            client.get("https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-mini.json").use { response ->
                 response.parseAs<List<Mapping>>().also { cachedMappings = it }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("AniList", "Failed to fetch anime mappings: ${e.message}")
             emptyList()
@@ -327,21 +334,27 @@ class AniList :
 
     override fun getAnimeUrl(anime: SAnime): String = "$baseUrl/anime/${anime.url}"
 
-    override suspend fun getAnimeDetails(anime: SAnime): SAnime {
-        val currentTime = System.currentTimeMillis() / 1000L
-        val lastRefresh = detailsLastRefreshed[anime.url] ?: 0L
+    override suspend fun getAnimeDetails(anime: SAnime): SAnime = detailsMutexes.getOrPut(anime.url) { Mutex() }.withLock {
+        val titleLang = preferences.titleLang
+        val additionalCovers = preferences.getBoolean(PREF_ADDITIONAL_COVERS_KEY, false)
+        val cacheKey = "${anime.url}:$titleLang:$additionalCovers"
+        val cached = detailsCache[cacheKey]
 
-        if (currentTime - lastRefresh < refreshInterval) {
-            return anime.apply {
-                if (coverList.isNotEmpty()) {
-                    thumbnail_url = coverList[coverIndex]
-                    coverIndex = (coverIndex + 1) % coverList.size
+        if (cached != null && System.nanoTime() - cached.fetchedAt < REFRESH_INTERVAL_NANOS) {
+            return@withLock cached.media.toSAnime(titleLang).apply {
+                if (cached.covers.isNotEmpty()) {
+                    thumbnail_url = cached.covers[cached.coverIndex]
+                    cached.coverIndex = (cached.coverIndex + 1) % cached.covers.size
                 }
             }
         }
 
-        val freshAnime = client.newCall(animeDetailsRequest(anime)).awaitSuccess().use(::animeDetailsParse)
-        detailsLastRefreshed[anime.url] = currentTime
+        val media = client.newCall(animeDetailsRequest(anime)).awaitSuccess().use {
+            it.parseGraphQLAs<DetailsResponse.DetailsData>().media
+        }
+        val freshAnime = media.toSAnime(titleLang)
+        val covers = if (additionalCovers) getAdditionalCovers(media) else emptyList()
+        detailsCache.put(cacheKey, DetailsCacheEntry(media, covers, System.nanoTime()))
         return freshAnime
     }
 
@@ -355,57 +368,53 @@ class AniList :
         )
     }
 
-    private var coverList = emptyList<String>()
-    private var coverIndex = 0
-    private var currentAnime = ""
-    private val detailsLastRefreshed = mutableMapOf<String, Long>()
-    private val episodesLastRefreshed = mutableMapOf<String, Long>()
-    private val episodeListMap = mutableMapOf<String, List<SEpisode>>()
-    private val refreshInterval = 15
+    private class DetailsCacheEntry(
+        val media: DetailsResponse.DetailsData.MediaObject,
+        val covers: List<String>,
+        val fetchedAt: Long,
+    ) {
+        var coverIndex = 0
+    }
+
+    private class EpisodeCacheEntry(
+        val episodes: List<SEpisode>,
+        val fetchedAt: Long,
+    )
+
+    private val detailsCache by lazy { LruCache<String, DetailsCacheEntry>(CACHE_SIZE) }
+    private val episodeCache by lazy { LruCache<String, EpisodeCacheEntry>(CACHE_SIZE) }
+    private val detailsMutexes = ConcurrentHashMap<String, Mutex>()
+    private val episodeMutexes = ConcurrentHashMap<String, Mutex>()
 
     private val coverProviders by lazy { CoverProviders(client, headers) }
 
-    override fun animeDetailsParse(response: Response): SAnime {
-        val titleLang = preferences.titleLang
-        val animeData = response.parseGraphQLAs<DetailsResponse.DetailsData>().media
-        val anime = animeData.toSAnime(titleLang)
+    override fun animeDetailsParse(response: Response): SAnime = response.parseGraphQLAs<DetailsResponse.DetailsData>().media.toSAnime(preferences.titleLang)
 
-        if (currentAnime != anime.url) {
-            currentAnime = ""
-            val type = if (animeData.format == "MOVIE") "movies" else "tv"
-
-            val animeId = anime.url.toIntOrNull()
-            val mapping = getMappings().firstOrNull { it.anilistId == animeId }
-            val malId = mapping?.malId?.toString()
-            val tvdbId = mapping?.thetvdbId?.toString()
-
-            coverList = buildList {
-                add(anime.thumbnail_url ?: "")
-                malId?.let { addAll(coverProviders.getMALCovers(malId)) }
-                tvdbId?.let { addAll(coverProviders.getFanartCovers(tvdbId, type)) }
-            }.filter { it.isNotEmpty() }
-
-            currentAnime = anime.url
-            coverIndex = 0
+    private suspend fun getAdditionalCovers(media: DetailsResponse.DetailsData.MediaObject): List<String> = coroutineScope {
+        val mapping = getMappings().firstOrNull { it.anilistId == media.id }
+        val malCovers = async { mapping?.malId?.let { coverProviders.getMALCovers(it.toString()) }.orEmpty() }
+        val fanartCovers = async {
+            mapping?.thetvdbId?.let {
+                coverProviders.getFanartCovers(it.toString(), if (media.format == "MOVIE") "movies" else "tv")
+            }.orEmpty()
         }
-
-        return anime
+        (listOfNotNull(media.coverImage.bestCoverUrl) + malCovers.await() + fanartCovers.await())
+            .filter { it.isNotBlank() }.distinct()
     }
 
     // ============================== Episodes ==============================
 
-    override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
-        val currentTime = System.currentTimeMillis() / 1000L
-        val lastRefresh = episodesLastRefreshed[anime.url] ?: 0L
-        val cachedEpisodes = episodeListMap[anime.url]
-
-        if (cachedEpisodes != null && (currentTime - lastRefresh < refreshInterval)) {
-            return cachedEpisodes
+    override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> = episodeMutexes.getOrPut(anime.url) { Mutex() }.withLock {
+        val cached = episodeCache[anime.url]
+        if (cached != null && System.nanoTime() - cached.fetchedAt < REFRESH_INTERVAL_NANOS) {
+            return@withLock cached.episodes
         }
 
-        val freshEpisodes = client.newCall(episodeListRequest(anime)).awaitSuccess().use(::episodeListParse)
-        episodesLastRefreshed[anime.url] = currentTime
-        episodeListMap[anime.url] = freshEpisodes
+        val data = client.newCall(episodeListRequest(anime)).awaitSuccess().use {
+            it.parseGraphQLAs<AniListEpisodeResponse.DataObject>().media
+        }
+        val freshEpisodes = fetchEpisodes(data)
+        episodeCache.put(anime.url, EpisodeCacheEntry(freshEpisodes, System.nanoTime()))
         return freshEpisodes
     }
 
@@ -414,33 +423,24 @@ class AniList :
         return graphQLPost(
             apiUrl,
             headers,
-            query = getMalIdQuery(),
+            query = getEpisodeQuery(),
             variables = MediaVariables(id = id, type = "ANIME"),
         )
     }
 
-    override fun episodeListParse(response: Response): List<SEpisode> {
-        val data = response.parseGraphQLAs<AnilistToMalResponse.DataObject>().media
+    override fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException()
+
+    private suspend fun fetchEpisodes(data: AniListEpisodeResponse.DataObject.MediaObject): List<SEpisode> {
         if (data.status == "NOT_YET_RELEASED") {
             return emptyList()
         }
 
         val malId = data.idMal
-        val anilistId = data.id
-
-        val episodeData = client.newCall(anilistEpisodeRequest(anilistId)).execute().use {
-            it.parseGraphQLAs<AniListEpisodeResponse.DataObject>().media
-        }
-        val episodeCount = episodeData.nextAiringEpisode?.episode?.minus(1)
-            ?: episodeData.episodes ?: 0
+        val episodeCount = data.nextAiringEpisode?.episode?.minus(1)
+            ?: data.episodes ?: 0
 
         if (malId != null) {
-            val episodeList = try {
-                getFromMal(malId, episodeCount)
-            } catch (e: Exception) {
-                Log.e("Anilist-Ext", "Failed to get episodes from mal: ${e.message}")
-                null
-            }
+            val episodeList = getFromMal(malId, episodeCount)
 
             if (!episodeList.isNullOrEmpty()) {
                 return episodeList
@@ -457,13 +457,6 @@ class AniList :
             }
         }.reversed()
     }
-
-    private fun anilistEpisodeRequest(anilistId: Int): Request = graphQLPost(
-        apiUrl,
-        headers,
-        query = getEpisodeQuery(),
-        variables = MediaVariables(id = anilistId, type = "ANIME"),
-    )
 
     private fun parseDate(dateString: String?): Long {
         if (dateString.isNullOrBlank()) return 0L
@@ -489,15 +482,12 @@ class AniList :
         }
     }
 
-    private fun getSingleEpisodeFromMal(malId: Int): List<SEpisode> {
+    private suspend fun getSingleEpisodeFromMal(malId: Int): List<SEpisode> {
         for (baseUrl in MAL_API_URLS) {
             try {
-                val animeData = client.newCall(
-                    GET("$baseUrl/anime/$malId", headers),
-                ).execute().use { response ->
-                    if (!response.isSuccessful) return@use null
+                val animeData = client.get("$baseUrl/anime/$malId").use { response ->
                     response.parseAs<JikanAnimeDto>().data
-                } ?: continue
+                }
 
                 return listOf(
                     SEpisode.create().apply {
@@ -509,6 +499,8 @@ class AniList :
                         preview_url = animeData.images?.jpg?.largeImageUrl ?: animeData.images?.jpg?.imageUrl
                     },
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Try next mirror
             }
@@ -516,7 +508,7 @@ class AniList :
         return emptyList()
     }
 
-    private fun getFromMal(malId: Int, episodeCount: Int): List<SEpisode>? {
+    private suspend fun getFromMal(malId: Int, episodeCount: Int): List<SEpisode>? {
         var isSingleEpisodeAnime = false
 
         for (baseUrl in MAL_API_URLS) {
@@ -526,12 +518,7 @@ class AniList :
                 var hasNextPage = true
                 var page = 1
                 while (hasNextPage) {
-                    val data = client.newCall(
-                        GET("$baseUrl/anime/$malId/episodes?page=$page", headers),
-                    ).execute().use { response ->
-                        if (!response.isSuccessful) {
-                            throw IOException("HTTP ${response.code} from $baseUrl on page $page")
-                        }
+                    val data = client.get("$baseUrl/anime/$malId/episodes?page=$page").use { response ->
                         response.parseAs<JikanEpisodesDto>()
                     }
 
@@ -574,6 +561,8 @@ class AniList :
 
                     return episodeList.filter { it.episode_number <= episodeCount }.sortedBy { -it.episode_number }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w("AniList", "Failed to get episodes from $baseUrl: ${e.message}")
             }
@@ -616,9 +605,12 @@ class AniList :
         private val REGEX_MILLIS by lazy { Regex("\\.\\d+([+-]\\d{4})$") }
 
         private const val PER_PAGE = 20
+        private const val CACHE_SIZE = 32
+        private const val REFRESH_INTERVAL_NANOS = 15_000_000_000L
 
         private const val PREF_USERNAME_KEY = "pref_anilist_username"
         private const val PREF_AUTH_TOKEN_KEY = "pref_anilist_auth_token"
+        private const val PREF_ADDITIONAL_COVERS_KEY = "pref_anilist_additional_covers"
 
         private const val PREF_ALLOW_ADULT_KEY = "preferred_allow_adult"
         private const val PREF_ALLOW_ADULT_DEFAULT = false
@@ -678,6 +670,13 @@ class AniList :
             entryValues = arrayOf("romaji", "english", "native")
             setDefaultValue(PREF_TITLE_LANG_DEFAULT)
             summary = "%s"
+        }.also(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = PREF_ADDITIONAL_COVERS_KEY
+            title = "Load additional covers"
+            summary = "Fetch alternative covers from MyAnimeList and Fanart.tv. Can increase loading time."
+            setDefaultValue(false)
         }.also(screen::addPreference)
     }
 }
