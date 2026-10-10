@@ -77,7 +77,7 @@ class ItemDto(
         )
         fetch_type = when (type) {
             ItemType.BoxSet, ItemType.Series -> FetchType.Seasons
-            else -> FetchType.Episodes
+            ItemType.Movie, ItemType.Season, ItemType.Episode, ItemType.Other -> FetchType.Episodes
         }
         url = baseUrl.toHttpUrl().newBuilder().apply {
             addPathSegment("Users")

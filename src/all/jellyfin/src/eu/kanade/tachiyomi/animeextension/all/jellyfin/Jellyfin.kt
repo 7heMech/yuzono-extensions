@@ -475,7 +475,9 @@ class Jellyfin(private val suffix: String) :
             val episodesUrl = baseUrl.toHttpUrl().newBuilder().apply {
                 addPathSegment("Shows")
                 if (fragment.startsWith("season,")) {
-                    addPathSegment(fragment.substringAfter(","))
+                    // Jellyfin ignores the series segment when seasonId is set, so fall back to the season id
+                    val seriesId = fragment.substringAfter(",").takeUnless { it.isBlank() || it == "null" }
+                    addPathSegment(seriesId ?: itemId)
                     addPathSegment("Episodes")
                     addQueryParameter("seasonId", itemId)
                 } else {
