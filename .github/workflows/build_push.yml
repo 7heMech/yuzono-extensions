@@ -11,9 +11,13 @@ env:
 
 jobs:
   seed:
-    name: Prepare identical cache snapshots
+    name: Prepare cache snapshots / ${{ matrix.scope }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [all, subset]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -25,6 +29,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
         with:
           cache-disabled: true
+      - name: Match the cache seed to the module layout
+        if: matrix.scope == 'subset'
+        run: |
+          python - <<'PYCODE'
+          from pathlib import Path
+          settings = Path("settings.gradle.kts")
+          settings.write_text(settings.read_text().replace("\nloadAllIndividualExtensions()\n", '\nloadIndividualExtension("en", "av1encodes")\n'))
+          PYCODE
       - name: Seed Release outputs as master does
         run: |
           set -o pipefail
@@ -39,20 +51,20 @@ jobs:
           tar -C "$HOME/.gradle/caches" -czf "$RUNNER_TEMP/gradle-debug-build-cache.tgz" build-cache-1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: gradle-baseline
+          name: gradle-baseline-${{ matrix.scope }}
           path: ${{ runner.temp }}/gradle-baseline.tgz
           compression-level: 0
           retention-days: 2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: gradle-debug-build-cache
+          name: gradle-debug-build-cache-${{ matrix.scope }}
           path: ${{ runner.temp }}/gradle-debug-build-cache.tgz
           compression-level: 0
           retention-days: 2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: seed-logs
+          name: seed-logs-${{ matrix.scope }}
           path: seed-*.log
           retention-days: 2
   benchmark:
@@ -79,14 +91,14 @@ jobs:
           cache-disabled: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: gradle-baseline
+          name: gradle-baseline-${{ matrix.scope }}
           path: ${{ runner.temp }}/baseline
       - name: Restore baseline
         run: tar -C "$HOME" -xzf "$RUNNER_TEMP/baseline/gradle-baseline.tgz"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         if: matrix.cache == 'debug'
         with:
-          name: gradle-debug-build-cache
+          name: gradle-debug-build-cache-${{ matrix.scope }}
           path: ${{ runner.temp }}/debug
       - name: Restore warmed Debug outputs
         if: matrix.cache == 'debug'
