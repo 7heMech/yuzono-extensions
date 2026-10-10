@@ -1,0 +1,324 @@
+[
+  {
+    "run_id": 38039069149,
+    "results": [
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 1,
+        "elapsed_seconds": 33.348,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 32s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 2,
+        "elapsed_seconds": 38.559,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 38s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 3,
+        "elapsed_seconds": 40.444,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 40s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 1,
+        "elapsed_seconds": 44.666,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 44s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 2,
+        "elapsed_seconds": 44.125,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 43s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 3,
+        "elapsed_seconds": 46.779,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 46s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 1,
+        "elapsed_seconds": 51.199,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 50s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 2,
+        "elapsed_seconds": 42.12,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 41s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 3,
+        "elapsed_seconds": 55.863,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 55s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 1,
+        "elapsed_seconds": 52.587,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 52s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 2,
+        "elapsed_seconds": 43.226,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 42s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 3,
+        "elapsed_seconds": 45.204,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 44s",
+          "74 actionable tasks: 72 executed, 2 from cache"
+        ]
+      }
+    ]
+  },
+  {
+    "run_id": 38039415611,
+    "results": [
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 1,
+        "elapsed_seconds": 41.091,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 40s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 2,
+        "elapsed_seconds": 30.731,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 30s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "debug",
+        "sample": 3,
+        "elapsed_seconds": 24.624,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 24s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 1,
+        "elapsed_seconds": 35.006,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 34s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 2,
+        "elapsed_seconds": 43.433,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 43s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "all",
+        "cache": "release",
+        "sample": 3,
+        "elapsed_seconds": 40.647,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 40s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 1,
+        "elapsed_seconds": 37.452,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 36s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 2,
+        "elapsed_seconds": 36.79,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 36s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "debug",
+        "sample": 3,
+        "elapsed_seconds": 29.145,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin FROM-CACHE",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 28s",
+          "74 actionable tasks: 43 executed, 24 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 1,
+        "elapsed_seconds": 44.721,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 44s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 2,
+        "elapsed_seconds": 41.427,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 41s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      },
+      {
+        "scope": "subset",
+        "cache": "release",
+        "sample": 3,
+        "elapsed_seconds": 27.713,
+        "exit_code": 0,
+        "core_compile": "> Task :core:compileDebugKotlin",
+        "extension_compile": "> Task :src:en:av1encodes:compileDebugKotlin",
+        "summary": [
+          "BUILD SUCCESSFUL in 27s",
+          "74 actionable tasks: 45 executed, 22 from cache, 7 up-to-date"
+        ]
+      }
+    ]
+  }
+]
