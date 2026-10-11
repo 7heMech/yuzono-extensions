@@ -16,7 +16,12 @@ import okhttp3.OkHttpClient
 import java.io.File
 import kotlin.math.abs
 
-class PlaylistUtils(private val client: OkHttpClient, private val headers: Headers = commonEmptyHeaders) {
+class PlaylistUtils(
+    private val client: OkHttpClient,
+    // Keep the compatibility helper for apps using older OkHttp versions.
+    @Suppress("DEPRECATION")
+    private val headers: Headers = commonEmptyHeaders,
+) {
 
     // ================================ M3U8 ================================
 
@@ -99,9 +104,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
         val variants = parseHlsMasterPlaylist(playlistUrl, masterPlaylist)
             ?: return listOf(
                 Video(
-                    playlistUrl,
-                    videoNameGen("Video"),
-                    playlistUrl,
+                    videoUrl = playlistUrl,
+                    videoTitle = videoNameGen("Video"),
                     headers = masterHeaders,
                     subtitleTracks = subtitleList,
                     audioTracks = audioList,
@@ -164,9 +168,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             val videoUrl = variant.url
 
             bandwidth to Video(
-                url = videoUrl,
-                quality = videoNameGen(streamName),
                 videoUrl = videoUrl,
+                videoTitle = videoNameGen(streamName),
                 headers = videoHeadersGen(headers, referer, videoUrl),
                 subtitleTracks = subtitleList + variant.subtitleTracks,
                 audioTracks = audioList + variant.audioTracks,
@@ -330,9 +333,8 @@ class PlaylistUtils(private val client: OkHttpClient, private val headers: Heade
             val videoUrl = videoSrc.text()
 
             Video(
-                videoUrl,
-                videoNameGen(res, bandwidth),
-                videoUrl,
+                videoUrl = videoUrl,
+                videoTitle = videoNameGen(res, bandwidth),
                 audioTracks = audioTracks,
                 subtitleTracks = subtitleList,
                 headers = videoHeadersGen(headers, referer, videoUrl),
