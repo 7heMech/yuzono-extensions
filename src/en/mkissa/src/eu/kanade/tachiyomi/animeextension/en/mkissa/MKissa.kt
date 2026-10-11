@@ -267,17 +267,17 @@ class MKissa :
             val videoUrl = source.sourceUrl.decryptSource()
             val sourceName = source.sourceName.lowercase()
 
-            val internalName = if (videoUrl.startsWith("/apivtwo/")) {
-                INTERNAL_HOSTER_MATCHERS
-                    .filter { (name, pattern) -> name in hosterSelection && pattern.containsMatchIn(sourceName) }
-                    .maxByOrNull { (name, _) -> name.length }
-                    ?.first
-            } else {
-                null
-            }
+            val hosterName = HOSTER_MATCHERS
+                .filter { (_, pattern) -> pattern.containsMatchIn(sourceName) }
+                .maxByOrNull { (name, _) -> name.length }
+                ?.first
+
+            // Check the named host before falling back to a generic player or URL extractor.
+            if (hosterName != null && hosterName !in hosterSelection) return@mapNotNull null
 
             val data = when {
-                internalName != null -> HosterData(videoUrl, EXTRACTOR_INTERNAL, internalName, source.priority)
+                hosterName != null && videoUrl.startsWith("/apivtwo/") ->
+                    HosterData(videoUrl, EXTRACTOR_INTERNAL, hosterName, source.priority)
 
                 "player" in altHosterSelection && source.type == "player" ->
                     HosterData(videoUrl, EXTRACTOR_PLAYER, "player", source.priority)
@@ -448,7 +448,8 @@ class MKissa :
             "Si-Hls", "S-mp4", "Ac-Hls", "Uv-mp4", "Pn-Hls",
         )
 
-        private val INTERNAL_HOSTER_MATCHERS = INTERAL_HOSTER_NAMES.map {
+        private val HOSTER_NAMES = INTERAL_HOSTER_NAMES + "Fm-Hls"
+        private val HOSTER_MATCHERS = HOSTER_NAMES.map {
             it.lowercase() to Regex("""\b${Regex.escape(it.lowercase())}\b""")
         }
 
@@ -503,7 +504,6 @@ class MKissa :
 
         private const val PREF_HOSTER_KEY = "hoster_selection"
 
-        private val HOSTER_NAMES = INTERAL_HOSTER_NAMES + "Fm-Hls"
         private val PREF_HOSTER_ENTRY_VALUES = HOSTER_NAMES.map {
             it.lowercase()
         }.toTypedArray()
