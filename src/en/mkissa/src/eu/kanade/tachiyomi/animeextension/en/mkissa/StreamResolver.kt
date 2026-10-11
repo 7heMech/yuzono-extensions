@@ -84,7 +84,7 @@ class StreamResolver(
                     state.sawCaptcha.set(true)
                 } else if (state.apiError.getAndSet(value) == null) {
                     // The app retries some errors itself, so give it a moment before failing.
-                    handler.postDelayed({ finish(Result.failure(state.timeoutError())) }, API_ERROR_GRACE_MS)
+                    handler.postDelayed({ finish(Result.failure(state.timeoutError())) }, errorGraceMs(value))
                 }
             }
         }
@@ -124,6 +124,12 @@ class StreamResolver(
         }
     }
 
+    // A throttled query says when it may be retried; wait past that before giving up on it.
+    private fun errorGraceMs(message: String): Long = RETRY_AFTER_REGEX.find(message)
+        ?.groupValues?.get(1)?.toLongOrNull()
+        ?.let { (it + 3) * 1000 }
+        ?: API_ERROR_GRACE_MS
+
     private fun target(episode: EpisodeVariables.Variables, token: String): String = mapOf(
         "showId" to episode.showId,
         "episode" to episode.episodeString,
@@ -152,6 +158,7 @@ class StreamResolver(
         private const val BRIDGE_NAME = "MKissaBridge"
         private const val TIMEOUT_MS = 30_000L
         private const val API_ERROR_GRACE_MS = 5_000L
+        private val RETRY_AFTER_REGEX = Regex("""try again in (\d+) seconds""")
 
         private const val CAPTCHA_ERROR = "NEED_CAPTCHA"
 
