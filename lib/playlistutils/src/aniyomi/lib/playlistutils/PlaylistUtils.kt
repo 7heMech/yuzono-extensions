@@ -82,6 +82,7 @@ class PlaylistUtils(
      * @param audioList a list of audio tracks associated with the HLS playlist, will append to audio tracks present in the m3u8 playlist (default: empty list)
      * @return a list of Video objects
      */
+    @Suppress("DEPRECATION") // Retain the legacy Video ABI for extensions targeting lib 14.
     fun extractFromHls(
         playlistUrl: String,
         referer: String = playlistUrl.toDefaultReferer(),
@@ -104,8 +105,9 @@ class PlaylistUtils(
         val variants = parseHlsMasterPlaylist(playlistUrl, masterPlaylist)
             ?: return listOf(
                 Video(
-                    videoUrl = playlistUrl,
-                    videoTitle = videoNameGen("Video"),
+                    playlistUrl,
+                    videoNameGen("Video"),
+                    playlistUrl,
                     headers = masterHeaders,
                     subtitleTracks = subtitleList,
                     audioTracks = audioList,
@@ -168,8 +170,9 @@ class PlaylistUtils(
             val videoUrl = variant.url
 
             bandwidth to Video(
+                url = videoUrl,
+                quality = videoNameGen(streamName),
                 videoUrl = videoUrl,
-                videoTitle = videoNameGen(streamName),
                 headers = videoHeadersGen(headers, referer, videoUrl),
                 subtitleTracks = subtitleList + variant.subtitleTracks,
                 audioTracks = audioList + variant.audioTracks,
@@ -299,7 +302,7 @@ class PlaylistUtils(
      * @param audioList a list of audio tracks associated with the DASH file, will append to audio tracks present in the dash file (default: empty list)
      * @return a list of Video objects
      */
-    @Suppress("MemberVisibilityCanBePrivate")
+    @Suppress("MemberVisibilityCanBePrivate", "DEPRECATION") // Retain the legacy Video ABI for extensions targeting lib 14.
     fun extractFromDash(
         mpdUrl: String,
         videoNameGen: (String, String) -> String,
@@ -333,8 +336,9 @@ class PlaylistUtils(
             val videoUrl = videoSrc.text()
 
             Video(
-                videoUrl = videoUrl,
-                videoTitle = videoNameGen(res, bandwidth),
+                videoUrl,
+                videoNameGen(res, bandwidth),
+                videoUrl,
                 audioTracks = audioTracks,
                 subtitleTracks = subtitleList,
                 headers = videoHeadersGen(headers, referer, videoUrl),
