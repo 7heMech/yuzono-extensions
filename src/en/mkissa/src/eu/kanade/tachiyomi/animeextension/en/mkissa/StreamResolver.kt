@@ -49,6 +49,7 @@ class StreamResolver(
     private class LoadState {
         val sawCaptcha = AtomicBoolean(false)
         val apiError = AtomicReference<String?>(null)
+        val deadline = System.currentTimeMillis() + TIMEOUT_MS
 
         fun timeoutError() = IOException(
             when {
@@ -83,8 +84,14 @@ class StreamResolver(
                 Bridge.API_ERROR -> if (CAPTCHA_ERROR in value) {
                     state.sawCaptcha.set(true)
                 } else if (state.apiError.getAndSet(value) == null) {
-                    // The app retries some errors itself, so give it a moment before failing.
-                    handler.postDelayed({ finish(Result.failure(state.timeoutError())) }, errorGraceMs(value))
+                    // The app retries some errors itself, so give it a moment before failing, unless
+                    // the retry couldn't land before the timeout anyway.
+                    val grace = errorGraceMs(value)
+                    if (System.currentTimeMillis() + grace >= state.deadline) {
+                        finish(Result.failure(state.timeoutError()))
+                    } else {
+                        handler.postDelayed({ finish(Result.failure(state.timeoutError())) }, grace)
+                    }
                 }
             }
         }
