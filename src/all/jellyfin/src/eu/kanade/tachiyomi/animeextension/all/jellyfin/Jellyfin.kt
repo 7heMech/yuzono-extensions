@@ -424,6 +424,8 @@ class Jellyfin(private val suffix: String) :
         return infoData.toSAnime(baseUrl, preferences.userId, preferences.concatNames)
     }
 
+    override fun getAnimeUrl(anime: SAnime): String = getWebUrl(anime.url)
+
     // ============================== Episodes ==============================
 
     override suspend fun getSeasonList(anime: SAnime): List<SAnime> {
@@ -500,6 +502,8 @@ class Jellyfin(private val suffix: String) :
             )
         }.reversed()
     }
+
+    override fun getEpisodeUrl(episode: SEpisode): String = getWebUrl(episode.url)
 
     // ============================ Video Links =============================
 
@@ -642,7 +646,7 @@ class Jellyfin(private val suffix: String) :
                         itemId = itemId,
                         audioStreamIndex = audioTrackIndex?.toString(),
                         subtitleStreamIndex = subtitleTrackIndex?.toString(),
-                    ).toJsonString(),
+                    ).toJsonString(json),
                 ),
             )
         }
@@ -782,6 +786,12 @@ class Jellyfin(private val suffix: String) :
     }
 
     // ============================= Utilities ==============================
+
+    // Anime and episode urls point to the API, so open the item's page in the web client instead
+    private fun getWebUrl(apiUrl: String): String {
+        val itemId = apiUrl.toHttpUrl().pathSegments.last()
+        return "$baseUrl/web/#/details?id=$itemId"
+    }
 
     private fun getItemsUrl(startIndex: Int): HttpUrl = baseUrl.toHttpUrl().newBuilder().apply {
         addPathSegment("Users")
