@@ -973,7 +973,7 @@ class Jellyfin(private val suffix: String) :
             }
         }
 
-        fun logIn() {
+        fun logIn(username: String = preferences.username, password: String = preferences.password) {
             mediaLibraryPref.setEnabled(false)
             mediaLibraryPref.summary = "Loading..."
             clearCredentials()
@@ -981,7 +981,7 @@ class Jellyfin(private val suffix: String) :
             loginJob?.cancel()
             loginJob = scope.launch {
                 try {
-                    val loginDto = authenticate(preferences.username, preferences.password)
+                    val loginDto = authenticate(username, password)
 
                     preferences.userId = loginDto.sessionInfo.userId
                     preferences.apiKey = loginDto.accessToken
@@ -1057,7 +1057,7 @@ class Jellyfin(private val suffix: String) :
             if (it.isBlank()) {
                 onCompleteLogin(false)
             } else {
-                if (preferences.username.isNotBlank() && preferences.password.isNotBlank()) {
+                if (preferences.username.isNotBlank()) {
                     logIn()
                 }
             }
@@ -1074,8 +1074,8 @@ class Jellyfin(private val suffix: String) :
             if (it.isBlank()) {
                 onCompleteLogin(false)
             } else {
-                if (baseUrl.isNotBlank() && preferences.password.isNotBlank()) {
-                    logIn()
+                if (baseUrl.isNotBlank()) {
+                    logIn(username = it)
                 }
             }
         }
@@ -1091,12 +1091,9 @@ class Jellyfin(private val suffix: String) :
             getSummary = passwordSummary,
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
         ) {
-            if (it.isBlank()) {
-                onCompleteLogin(false)
-            } else {
-                if (baseUrl.isNotBlank() && preferences.username.isNotBlank()) {
-                    logIn()
-                }
+            // Jellyfin accounts can have an empty password
+            if (baseUrl.isNotBlank() && preferences.username.isNotBlank()) {
+                logIn(password = it)
             }
         }
 
