@@ -9,5 +9,6 @@ ext {
 apply plugin: "kei.plugins.extension.legacy"
 
 dependencies {
+    implementation(project(":lib:hlsdash"))
     implementation("org.apache.commons:commons-text:1.15.0")
 }

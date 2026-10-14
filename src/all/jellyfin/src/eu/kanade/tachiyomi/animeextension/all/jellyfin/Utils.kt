@@ -164,7 +164,8 @@ fun getDeviceProfile(
             ),
             DeviceProfileDto.ProfileDto(
                 type = "Video",
-                container = "mp4",
+                // The app's FFmpeg can't seek fMP4 HLS, so use MPEG-TS segments when the codec fits in them
+                container = if (videoCodec.trim().equals("h264", ignoreCase = true)) "ts" else "mp4",
                 protocol = "hls",
                 audioCodec = "aac,mp3,ac3,opus,flac,vorbis",
                 videoCodec = videoCodec,

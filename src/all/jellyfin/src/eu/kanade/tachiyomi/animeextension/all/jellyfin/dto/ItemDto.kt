@@ -256,6 +256,7 @@ class MediaDto(
     val id: String? = null,
     val bitrate: Int? = null,
     val transcodingUrl: String? = null,
+    val transcodingContainer: String? = null,
     val isRemote: Boolean = false,
     val path: String? = null,
     val name: String? = null,

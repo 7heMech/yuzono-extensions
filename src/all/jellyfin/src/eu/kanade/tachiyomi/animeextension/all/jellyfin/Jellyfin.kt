@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.text.InputType
 import android.util.Log
 import androidx.preference.PreferenceScreen
+import aniyomi.lib.hlsdash.HlsDashServer
 import eu.kanade.tachiyomi.animeextension.BuildConfig
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.FiltersDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemDto
@@ -509,9 +510,14 @@ class Jellyfin(private val suffix: String) :
 
     override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
         val item = client.get(episode.url).parseAs<ItemDto>(json)
-        return item.mediaSources.orEmpty().filter { !it.id.isNullOrBlank() }.mapIndexed { index, source ->
+        val mediaSources = item.mediaSources.orEmpty().filter { !it.id.isNullOrBlank() }
+        return mediaSources.mapIndexed { index, source ->
             Hoster(
-                hosterName = source.name?.takeIf(String::isNotBlank) ?: "Jellyfin (${index + 1})",
+                // Without alternate versions, the media source is just named after the item
+                hosterName = when {
+                    mediaSources.size == 1 -> "Source"
+                    else -> source.name?.takeIf(String::isNotBlank) ?: "Version ${index + 1}"
+                },
                 hosterUrl = episode.url,
                 internalData = source.id!!,
             )
@@ -576,8 +582,7 @@ class Jellyfin(private val suffix: String) :
             return listOf(
                 Video(
                     videoTitle = buildString {
-                        append("Source (Remote)")
-                        mediaSource.name?.let { append("\n$it") }
+                        append("Remote")
                         append("\n${mediaSource.path}")
                     },
                     videoUrl = mediaSource.path,
@@ -609,7 +614,7 @@ class Jellyfin(private val suffix: String) :
         }.build().toString()
 
         val staticVideo = Video(
-            videoTitle = "Source - ${videoBitrate}ps",
+            videoTitle = "${videoBitrate}ps",
             videoUrl = staticUrl,
             bitrate = Int.MAX_VALUE,
             headers = videoHeaders,
@@ -713,11 +718,24 @@ class Jellyfin(private val suffix: String) :
             subtitleStreamIndex = transcodingInfo.subtitleStreamIndex,
         )
 
-        return sessionData.mediaSources.firstOrNull()?.transcodingUrl?.let {
-            video.copy(
-                videoUrl = baseUrl + it,
-            )
+        val mediaSource = sessionData.mediaSources.firstOrNull { it.id == transcodingInfo.mediaId }
+            ?: return null
+        val transcodingUrl = baseUrl + (mediaSource.transcodingUrl ?: return null)
+        if (mediaSource.transcodingContainer != "mp4") {
+            return video.copy(videoUrl = transcodingUrl)
         }
+
+        // fMP4 segments, served as DASH over loopback so that seeking works
+        val videoHeaders = video.headers ?: headers
+        val masterPlaylist = client.get(transcodingUrl, videoHeaders).use { it.body.string() }
+        val mediaPlaylist = masterPlaylist.lineSequence()
+            .map(String::trim)
+            .first { it.isNotEmpty() && !it.startsWith("#") }
+        val mediaPlaylistUrl = transcodingUrl.toHttpUrl().resolve(mediaPlaylist)!!.toString()
+
+        return video.copy(
+            videoUrl = HlsDashServer.register(client, videoHeaders, mediaPlaylistUrl, null),
+        )
     }
 
     override fun List<Video>.sortVideos(): List<Video> = sortedWith(
