@@ -247,12 +247,22 @@ class MoviesMod : Source() {
             .orEmpty()
         val title = "$resolution$size"
 
-        // Resume Cloud serves a zip and Telegram File needs the Telegram bot, so neither is playable
+        // Telegram File needs the Telegram bot, so it isn't playable
         return doc.select("div.card-body a.btn").parallelCatchingFlatMap { btn ->
             val href = btn.attr("abs:href").takeUnless { it.isBlank() } ?: return@parallelCatchingFlatMap emptyList()
             val server = btn.text()
 
             when {
+                // Instant links can't seek, as Google ignores Range; the Resume Cloud zip is served seekable on loopback
+                href.contains("/zfile/") -> listOf(
+                    server to Video(
+                        videoUrl = "",
+                        videoTitle = title,
+                        resolution = resolution.toVideoResolution(),
+                        internalData = href,
+                        initialized = false,
+                    ),
+                )
                 href.contains("cdn.video-gen.xyz") || href.contains("video-seed.dev") ||
                     href.contains("r2.dev") || href.contains("instant.video-gen") -> {
                     val finalUrl = resolveRedirect(href)
@@ -274,6 +284,14 @@ class MoviesMod : Source() {
                 else -> emptyList()
             }
         }
+    }
+
+    override suspend fun resolveVideo(video: Video): Video? {
+        val zipUrl = client.get(video.internalData, headers, CacheControl.FORCE_NETWORK).asJsoup()
+            .selectFirst("a[href*=workers.dev][href$=.zip]")?.attr("abs:href")
+            ?: return null
+        val videoUrl = ZipVideoServer.register(client, headers, zipUrl) ?: return null
+        return video.copy(videoUrl = videoUrl, internalData = "", initialized = true)
     }
 
     // The instant links redirect to video-seed.dev?url=<stream>; that page is slow, so only read the Location header
