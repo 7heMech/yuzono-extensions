@@ -123,8 +123,7 @@ object ZipVideoServer : NanoHTTPD("127.0.0.1", 0) {
         }
     }
 
-    private fun Entry.zipOffset(position: Long): Long =
-        dataStart + (position / BLOCK_SIZE) * (BLOCK_SIZE + BLOCK_HEADER_SIZE) + BLOCK_HEADER_SIZE + position % BLOCK_SIZE
+    private fun Entry.zipOffset(position: Long): Long = dataStart + (position / BLOCK_SIZE) * (BLOCK_SIZE + BLOCK_HEADER_SIZE) + BLOCK_HEADER_SIZE + position % BLOCK_SIZE
 
     /** Reads the compressed and uncompressed size of the first entry of the central directory. */
     private fun centralDirectorySizes(tail: ByteArray): Pair<Long, Long>? {
