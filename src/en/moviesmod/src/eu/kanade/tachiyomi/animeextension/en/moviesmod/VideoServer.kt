@@ -258,22 +258,24 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
      * the file would hold up the start until the zip is ready, so their entries are pointed at a
      * Cluster instead, which players skip in a SeekHead.
      */
-    private fun seekHeadPatches(head: ByteArray): List<Patch> = runCatching {
-        val ebml = head.ebmlElement(0)
-        if (ebml.id != EBML) return emptyList()
-        val segment = head.ebmlElement(ebml.end)
-        if (segment.id != SEGMENT) return emptyList()
-        val segmentStart = segment.dataStart.toLong()
-        var i = segment.dataStart
-
-        while (i < head.size) {
-            val element = head.ebmlElement(i)
-            if (element.id == CLUSTER) break
-            if (element.id == SEEK_HEAD) return seekEntryPatches(head, element, segmentStart)
-            i = element.end
+    private fun seekHeadPatches(head: ByteArray): List<Patch> {
+        try {
+            val ebml = head.ebmlElement(0)
+            if (ebml.id != EBML) return emptyList()
+            val segment = head.ebmlElement(ebml.end)
+            if (segment.id != SEGMENT) return emptyList()
+            var i = segment.dataStart
+            while (i < head.size) {
+                val element = head.ebmlElement(i)
+                if (element.id == CLUSTER) break
+                if (element.id == SEEK_HEAD) return seekEntryPatches(head, element, segment.dataStart.toLong())
+                i = element.end
+            }
+        } catch (_: Exception) {
+            // Not Matroska, or a header that doesn't fit the probed bytes
         }
-        emptyList()
-    }.getOrDefault(emptyList())
+        return emptyList()
+    }
 
     private fun seekEntryPatches(head: ByteArray, seekHead: EbmlElement, segmentStart: Long): List<Patch> = buildList {
         var i = seekHead.dataStart
