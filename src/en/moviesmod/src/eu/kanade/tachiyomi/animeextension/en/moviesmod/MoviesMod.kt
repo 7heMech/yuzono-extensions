@@ -235,6 +235,14 @@ class MoviesMod : Source() {
             extractVideos(mediaUrl, link.quality)
         }
             .groupBy({ it.first }, { it.second })
+            // Instant can't seek, and a Resume Cloud zip may take a while to generate, so prefer the checked Direct links
+            .entries.sortedBy { (server, _) ->
+                when {
+                    server.startsWith("Direct") -> 0
+                    server.contains("Resume", true) -> 1
+                    else -> 2
+                }
+            }
             .map { (server, videos) ->
                 // Movies list the same file under two server buttons
                 Hoster(hosterName = server, videoList = videos.distinctBy { it.videoTitle }.sortVideosByPreference())
