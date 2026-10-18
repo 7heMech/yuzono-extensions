@@ -22,14 +22,19 @@ import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Serves Instant links to the player as seekable files over loopback.
+ * Serves Instant and Direct links to the player as seekable files over loopback, backed by the
+ * Resume Cloud zip of the same file.
  *
  * Instant links end at Google's UploadServer, which ignores Range, so the player can't seek in them.
- * They play from the start right away while the Resume Cloud zip of the same file is generated in the
- * background, and ranges far from the start are taken from the zip once it's ready. If it can't be
- * had, they are read through from the start of the Instant link.
+ * They play from the start right away while the zip is generated in the background, and ranges far
+ * from the start are taken from the zip once it's ready. If it can't be had, they are read through
+ * from the start of the Instant link.
+ *
+ * Direct links honour Range, but they are Google Drive API calls on a shared quota, which often runs
+ * out partway through a video. Once a Direct link fails, the zip is generated and serves the rest.
  *
  * The Resume Cloud worker honours Range but wraps the file in a zip. That zip deflates the file into
  * stored (uncompressed) blocks of a fixed size, so every byte of the video sits at a known offset of
@@ -62,11 +67,19 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
         val headers: Headers,
         val size: Long,
         val mime: String,
-        val directUrl: String,
+        /** A link that honours Range, used while it works. */
+        val rangeUrl: String?,
+        /** A link that ignores Range, read through from the start. */
+        val streamUrl: String?,
         val patches: List<Patch>,
+        val findZip: suspend () -> String?,
     ) {
         @Volatile
+        var rangeAlive = rangeUrl != null
+
+        @Volatile
         var zip: Zip? = null
+        val zipRequested = AtomicBoolean(false)
         val zipSettled = CountDownLatch(1)
     }
 
@@ -78,36 +91,50 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
-     * Returns the loopback URL of a direct link that ignores Range, taking far ranges from the zip
-     * that [findZip] resolves to, or `null` if the link honours Range and can be played as it is.
+     * Returns the loopback URL of [videoUrl], or `null` if it can't be served.
+     *
+     * @param videoUrl an Instant link, which ignores Range, or a Direct link, which honours it
+     * @param findZip resolves the Resume Cloud zip of the same file
      */
-    suspend fun registerDirect(client: OkHttpClient, headers: Headers, directUrl: String, findZip: suspend () -> String?): String? {
-        val id = idOf(directUrl)
+    suspend fun register(client: OkHttpClient, headers: Headers, videoUrl: String, findZip: suspend () -> String?): String? {
+        val id = idOf(videoUrl)
         if (synchronized(this) { entries[id] } != null) return urlOf(id)
 
         // Streamed files must not end up in the disk cache of the shared client.
         val streamClient = client.newBuilder().cache(null).build()
         val rangeHeaders = headers.newBuilder().set("Range", "bytes=0-${HEAD_SIZE - 1}").build()
-        val entry = streamClient.get(directUrl, rangeHeaders, CacheControl.FORCE_NETWORK).use { response ->
-            if (response.code == 206) return null
-            val size = response.body.contentLength().takeIf { it > 0 } ?: return null
-            val source = response.body.source()
-            source.request(HEAD_SIZE)
-            val head = source.buffer.readByteArray(minOf(source.buffer.size, HEAD_SIZE))
-            val mime = response.body.contentType()?.toString() ?: "application/octet-stream"
-            Entry(streamClient, headers, size, mime, directUrl, seekHeadPatches(head))
+        val entry = streamClient.get(videoUrl, rangeHeaders, CacheControl.FORCE_NETWORK, ensureSuccess = false).use { response ->
+            val type = response.body.contentType()
+            if (type == null || type.type == "text" || type.subtype == "json") return null
+            when (response.code) {
+                206 -> {
+                    val size = response.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull() ?: return null
+                    Entry(streamClient, headers, size, type.toString(), videoUrl, null, emptyList(), findZip)
+                }
+                200 -> {
+                    val size = response.body.contentLength().takeIf { it > 0 } ?: return null
+                    val source = response.body.source()
+                    source.request(HEAD_SIZE)
+                    val head = source.buffer.readByteArray(minOf(source.buffer.size, HEAD_SIZE))
+                    Entry(streamClient, headers, size, type.toString(), null, videoUrl, seekHeadPatches(head), findZip)
+                }
+                else -> return null
+            }
         }
         synchronized(this) {
             if (!isAlive) start()
             entries[id] = entry
         }
-        scope.launch {
-            // Without the zip, far ranges are read through the direct link.
-            entry.zip = runCatching { findZip()?.let { probeZip(streamClient, headers, it) } }.getOrNull()
-                ?.takeIf { it.size == entry.size }
-            entry.zipSettled.countDown()
-        }
+        if (entry.rangeUrl == null) entry.requestZip()
         return urlOf(id)
+    }
+
+    private fun Entry.requestZip() {
+        if (!zipRequested.compareAndSet(false, true)) return
+        scope.launch {
+            zip = runCatching { findZip()?.let { probeZip(client, headers, it) } }.getOrNull()?.takeIf { it.size == size }
+            zipSettled.countDown()
+        }
     }
 
     private fun idOf(key: String) = UUID.nameUUIDFromBytes(key.toByteArray()).toString()
@@ -142,11 +169,7 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
             }
         }
 
-        // Reading through the direct link costs as much as the offset, so far ranges wait for the zip.
-        if (entry.zip == null && start > DIRECT_SKIP_LIMIT) entry.zipSettled.await(ZIP_WAIT_SECONDS, TimeUnit.SECONDS)
-        val zip = entry.zip
-        val input = if (zip != null) openZip(entry, zip, start, end) else openDirect(entry, start)
-
+        val input = open(entry, start, end)
         val length = end - start + 1
         val data = if (entry.patches.isEmpty()) input else PatchedInputStream(input, start, entry.patches)
         val status = if (range == null) Status.OK else Status.PARTIAL_CONTENT
@@ -154,6 +177,32 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
             addHeader("Accept-Ranges", "bytes")
             if (range != null) addHeader("Content-Range", "bytes $start-$end/${entry.size}")
         }
+    }
+
+    private fun open(entry: Entry, start: Long, end: Long): InputStream {
+        if (entry.rangeAlive) {
+            openRange(entry, entry.rangeUrl!!, start, end)?.let { return it }
+            entry.rangeAlive = false
+            entry.requestZip()
+        }
+        // Reading through the stream link costs as much as the offset, so far ranges wait for the zip.
+        if (entry.zip == null && (entry.streamUrl == null || start > DIRECT_SKIP_LIMIT)) {
+            entry.zipSettled.await(ZIP_WAIT_SECONDS, TimeUnit.SECONDS)
+        }
+        entry.zip?.let { return openZip(entry, it, start, end) }
+        val streamUrl = entry.streamUrl ?: throw IOException("The link failed and there is no zip to fall back on")
+        return openStream(entry, streamUrl, start)
+    }
+
+    private fun openRange(entry: Entry, url: String, start: Long, end: Long): InputStream? {
+        val rangeHeaders = entry.headers.newBuilder().set("Range", "bytes=$start-$end").build()
+        val response = runCatching { entry.client.newCall(GET(url, rangeHeaders)).execute() }.getOrNull() ?: return null
+        val type = response.body.contentType()
+        if (response.code != 206 || type == null || type.type == "text" || type.subtype == "json") {
+            response.close()
+            return null
+        }
+        return response.body.byteStream()
     }
 
     private fun openZip(entry: Entry, zip: Zip, start: Long, end: Long): InputStream {
@@ -166,11 +215,11 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
         return StoredBlockInputStream(response.body.source(), BLOCK_SIZE - (start % BLOCK_SIZE).toInt())
     }
 
-    private fun openDirect(entry: Entry, start: Long): InputStream {
-        val response = entry.client.newCall(GET(entry.directUrl, entry.headers)).execute()
+    private fun openStream(entry: Entry, url: String, start: Long): InputStream {
+        val response = entry.client.newCall(GET(url, entry.headers)).execute()
         if (!response.isSuccessful) {
             response.close()
-            throw IOException("HTTP ${response.code} for the direct link")
+            throw IOException("HTTP ${response.code} for the stream link")
         }
         val source = response.body.source()
         try {

@@ -283,18 +283,18 @@ class MoviesMod : Source() {
                         playlistUtils.extractFromHls(href, videoNameGen = { q -> "$q$size" })
                     }.getOrDefault(emptyList()).map { server to it }
                 }
-                href.contains("/wfile/") -> extractWorkerLinks(href, resolution, size)
+                href.contains("/wfile/") -> extractWorkerLinks(href, resolution, size, zfileUrl)
                 else -> emptyList()
             }
         }
     }
 
-    // Instant links end at Google's UploadServer, which ignores Range; they are served seekable on loopback with the
-    // help of the Resume Cloud zip of the same file, and played as they are if that fails
+    // Instant links ignore Range and Direct links run out of quota partway through, so both are served on loopback
+    // with the Resume Cloud zip of the same file as a backup, and played as they are if that fails
     override suspend fun resolveVideo(video: Video): Video? {
         val zfileUrl = video.internalData
         val videoUrl = runCatching {
-            VideoServer.registerDirect(client, headers, video.videoUrl) { getZipUrl(zfileUrl) }
+            VideoServer.register(client, headers, video.videoUrl) { getZipUrl(zfileUrl) }
         }.getOrNull() ?: video.videoUrl
         return video.copy(videoUrl = videoUrl, internalData = "", initialized = true)
     }
@@ -337,7 +337,7 @@ class MoviesMod : Source() {
         }
     }.getOrNull()?.let { it.queryParameter("url") ?: it.toString() } ?: url
 
-    private suspend fun extractWorkerLinks(wfileUrl: String, resolution: String, size: String): List<Pair<String, Video>> {
+    private suspend fun extractWorkerLinks(wfileUrl: String, resolution: String, size: String, zfileUrl: String?): List<Pair<String, Video>> {
         val servers = runCatching { client.get(wfileUrl, headers).asJsoup() }.getOrNull()
             ?.select("a[href*='?type=']")
             ?.distinctBy { it.attr("abs:href") }
@@ -351,6 +351,8 @@ class MoviesMod : Source() {
                     videoUrl = url,
                     videoTitle = "$resolution$size",
                     resolution = resolution.toVideoResolution(),
+                    internalData = zfileUrl.orEmpty(),
+                    initialized = zfileUrl == null,
                 )
             }
         }
