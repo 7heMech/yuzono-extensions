@@ -235,16 +235,6 @@ class MoviesMod : Source() {
             extractVideos(mediaUrl, link.quality)
         }
             .groupBy({ it.first }, { it.second })
-            // Direct links are checked and seek natively; Instant starts at once but only seeks far once the zip is
-            // ready, and Resume Cloud waits for the zip before it starts
-            .entries.sortedBy { (server, _) ->
-                when {
-                    server.startsWith("Direct") -> 0
-                    server.contains("Instant", true) -> 1
-                    server.contains("Resume", true) -> 2
-                    else -> 3
-                }
-            }
             .map { (server, videos) ->
                 // Movies list the same file under two server buttons
                 Hoster(hosterName = server, videoList = videos.distinctBy { it.videoTitle }.sortVideosByPreference())
@@ -262,13 +252,12 @@ class MoviesMod : Source() {
         val title = "$resolution$size"
         val zfileUrl = doc.selectFirst("div.card-body a.btn[href*=/zfile/]")?.attr("abs:href")
 
-        // Telegram File needs the Telegram bot, so it isn't playable
+        // Resume Cloud serves a zip and Telegram File needs the Telegram bot, so neither is playable
         return doc.select("div.card-body a.btn").parallelCatchingFlatMap { btn ->
             val href = btn.attr("abs:href").takeUnless { it.isBlank() } ?: return@parallelCatchingFlatMap emptyList()
             val server = btn.text()
 
             when {
-                href.contains("/zfile/") -> listOf(server to lazyVideo(title, resolution, LazyVideo(zfileUrl = href)))
                 href.contains("cdn.video-gen.xyz") || href.contains("video-seed.dev") ||
                     href.contains("r2.dev") || href.contains("instant.video-gen") -> {
                     val finalUrl = resolveRedirect(href)
@@ -277,7 +266,15 @@ class MoviesMod : Source() {
                             playlistUtils.extractFromHls(finalUrl, videoNameGen = { q -> "$q$size" })
                         }.getOrDefault(listOf(Video(videoUrl = finalUrl, videoTitle = title)))
                     } else {
-                        listOf(lazyVideo(title, resolution, LazyVideo(zfileUrl = zfileUrl, directUrl = finalUrl)))
+                        listOf(
+                            Video(
+                                videoUrl = finalUrl,
+                                videoTitle = title,
+                                resolution = resolution.toVideoResolution(),
+                                internalData = zfileUrl.orEmpty(),
+                                initialized = zfileUrl == null,
+                            ),
+                        )
                     }
                     videos.map { server to it }
                 }
@@ -292,27 +289,13 @@ class MoviesMod : Source() {
         }
     }
 
-    private fun lazyVideo(title: String, resolution: String, data: LazyVideo) = Video(
-        videoUrl = "",
-        videoTitle = title,
-        resolution = resolution.toVideoResolution(),
-        internalData = json.encodeToString(data),
-        initialized = false,
-    )
-
-    // Instant links end at Google's UploadServer, which ignores Range; both they and Resume Cloud zips are served
-    // seekable on loopback
+    // Instant links end at Google's UploadServer, which ignores Range; they are served seekable on loopback with the
+    // help of the Resume Cloud zip of the same file, and played as they are if that fails
     override suspend fun resolveVideo(video: Video): Video? {
-        val data = json.decodeFromString<LazyVideo>(video.internalData)
-        val directUrl = data.directUrl
-        val zfileUrl = data.zfileUrl
-        val videoUrl = when {
-            directUrl != null -> runCatching {
-                VideoServer.registerDirect(client, headers, directUrl) { zfileUrl?.let { getZipUrl(it) } }
-            }.getOrNull() ?: directUrl
-            zfileUrl != null -> getZipUrl(zfileUrl)?.let { VideoServer.registerZip(client, headers, it) } ?: return null
-            else -> return null
-        }
+        val zfileUrl = video.internalData
+        val videoUrl = runCatching {
+            VideoServer.registerDirect(client, headers, video.videoUrl) { getZipUrl(zfileUrl) }
+        }.getOrNull() ?: video.videoUrl
         return video.copy(videoUrl = videoUrl, internalData = "", initialized = true)
     }
 
@@ -461,12 +444,6 @@ class MoviesMod : Source() {
     data class EpUrl(
         val quality: String = "",
         val url: String = "",
-    )
-
-    @Serializable
-    class LazyVideo(
-        val zfileUrl: String?,
-        val directUrl: String? = null,
     )
 
     private fun EpLinks.toJson(): String = json.encodeToString(this)

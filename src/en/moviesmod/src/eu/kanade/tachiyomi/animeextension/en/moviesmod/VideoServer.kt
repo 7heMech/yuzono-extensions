@@ -24,16 +24,16 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Serves MoviesMod files to the player as seekable files over loopback.
+ * Serves Instant links to the player as seekable files over loopback.
+ *
+ * Instant links end at Google's UploadServer, which ignores Range, so the player can't seek in them.
+ * They play from the start right away while the Resume Cloud zip of the same file is generated in the
+ * background, and ranges far from the start are taken from the zip once it's ready. If it can't be
+ * had, they are read through from the start of the Instant link.
  *
  * The Resume Cloud worker honours Range but wraps the file in a zip. That zip deflates the file into
  * stored (uncompressed) blocks of a fixed size, so every byte of the video sits at a known offset of
  * the zip, and a range of the video is served by dropping the 5-byte header in front of each block.
- *
- * Instant links end at Google's UploadServer, which ignores Range. They play from the start right
- * away while the Resume Cloud zip of the same file is generated in the background; ranges far from
- * the start are taken from the zip once it's ready, and read through from the start of the Instant
- * link if it can't be had.
  */
 object VideoServer : NanoHTTPD("127.0.0.1", 0) {
 
@@ -53,7 +53,7 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
     private const val CLUSTER = 0x1F43B675L
     private val DEFERRABLE = setOf(0x1254C367L, 0x1043A770L, 0x1941A469L) // Tags, Chapters, Attachments
 
-    private class Zip(val url: String, val dataStart: Long, val size: Long, val mime: String)
+    private class Zip(val url: String, val dataStart: Long, val size: Long)
 
     private class Patch(val position: Long, val bytes: ByteArray)
 
@@ -62,7 +62,7 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
         val headers: Headers,
         val size: Long,
         val mime: String,
-        val directUrl: String?,
+        val directUrl: String,
         val patches: List<Patch>,
     ) {
         @Volatile
@@ -76,18 +76,6 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /**
-     * Checks the layout of a Resume Cloud zip and returns the loopback URL of the file inside it,
-     * or `null` if the zip isn't made of fixed-size stored blocks.
-     */
-    suspend fun registerZip(client: OkHttpClient, headers: Headers, zipUrl: String): String? {
-        val zip = probeZip(client, headers, zipUrl) ?: return null
-        val entry = Entry(client, headers, zip.size, zip.mime, null, emptyList())
-        entry.zip = zip
-        entry.zipSettled.countDown()
-        return add(zipUrl, entry)
-    }
 
     /**
      * Returns the loopback URL of a direct link that ignores Range, taking far ranges from the zip
@@ -109,22 +97,15 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
             val mime = response.body.contentType()?.toString() ?: "application/octet-stream"
             Entry(streamClient, headers, size, mime, directUrl, seekHeadPatches(head))
         }
-        val url = add(directUrl, entry)
-        scope.launch {
-            try {
-                entry.zip = findZip()?.let { probeZip(streamClient, headers, it) }?.takeIf { it.size == entry.size }
-            } finally {
-                entry.zipSettled.countDown()
-            }
-        }
-        return url
-    }
-
-    private fun add(key: String, entry: Entry): String {
-        val id = idOf(key)
         synchronized(this) {
             if (!isAlive) start()
             entries[id] = entry
+        }
+        scope.launch {
+            // Without the zip, far ranges are read through the direct link.
+            entry.zip = runCatching { findZip()?.let { probeZip(streamClient, headers, it) } }.getOrNull()
+                ?.takeIf { it.size == entry.size }
+            entry.zipSettled.countDown()
         }
         return urlOf(id)
     }
@@ -186,7 +167,7 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
     }
 
     private fun openDirect(entry: Entry, start: Long): InputStream {
-        val response = entry.client.newCall(GET(entry.directUrl!!, entry.headers)).execute()
+        val response = entry.client.newCall(GET(entry.directUrl, entry.headers)).execute()
         if (!response.isSuccessful) {
             response.close()
             throw IOException("HTTP ${response.code} for the direct link")
@@ -208,10 +189,8 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
         val total = head.total ?: return null
         val local = head.bytes.littleEndian()
         if (local.int(0) != 0x04034b50 || local.short(8) != 8) return null
-        val nameLength = local.short(26)
-        val dataStart = 30L + nameLength + local.short(28)
+        val dataStart = 30L + local.short(26) + local.short(28)
         if (dataStart + BLOCK_HEADER_SIZE > head.bytes.size) return null
-        val name = String(head.bytes, 30, nameLength)
 
         val tail = client.fetchRange(headers, zipUrl, "-${minOf(PROBE_SIZE, total)}").bytes
         val (compressed, size) = centralDirectorySizes(tail) ?: return null
@@ -220,13 +199,7 @@ object VideoServer : NanoHTTPD("127.0.0.1", 0) {
         if (compressed - size != blocks * BLOCK_HEADER_SIZE && compressed - size != (blocks + 1) * BLOCK_HEADER_SIZE) return null
         val firstStored = (head.bytes[dataStart.toInt()].toInt() and 0x06) == 0
         if (!firstStored || (size > BLOCK_SIZE && local.short(dataStart.toInt() + 1) != BLOCK_SIZE)) return null
-
-        val mime = when (name.substringAfterLast('.').lowercase()) {
-            "mkv" -> "video/x-matroska"
-            "mp4" -> "video/mp4"
-            else -> "application/octet-stream"
-        }
-        return Zip(zipUrl, dataStart, size, mime)
+        return Zip(zipUrl, dataStart, size)
     }
 
     /** Reads the compressed and uncompressed size of the first entry of the central directory. */
