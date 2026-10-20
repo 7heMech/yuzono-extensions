@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemListDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.ItemType
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.LoginDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.LoginRequestDto
+import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.MediaDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.MediaLibraryDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.PlaybackInfoDto
 import eu.kanade.tachiyomi.animeextension.all.jellyfin.dto.SessionDto
@@ -577,7 +578,7 @@ class Jellyfin(private val suffix: String) :
         var subtitleTrackIndex: Int? = null
         val preferSource = preferences.quality == PREF_QUALITY_DEFAULT
 
-        mediaSource.mediaStreams.forEach { media ->
+        fun addTracks(mediaStreams: List<MediaDto.MediaStreamDto>) = mediaStreams.forEach { media ->
             when (media.type) {
                 "Subtitle" -> {
                     if (media.supportsExternalStream && media.codec != null) {
@@ -608,6 +609,7 @@ class Jellyfin(private val suffix: String) :
                 }
             }
         }
+        addTracks(mediaSource.mediaStreams)
 
         val videoHeaders = headersBuilder()
             .add("Authorization", getAuthHeader(deviceInfo, preferences.apiKey))
@@ -648,8 +650,14 @@ class Jellyfin(private val suffix: String) :
         // PlaybackInfo probes unprobed sources such as .strm files, so prefer its details
         val sessionMediaSource = sessionData.mediaSources.firstOrNull { it.id == mediaSource.id }
             ?: return emptyList()
+        if (mediaSource.mediaStreams.isEmpty()) {
+            addTracks(sessionMediaSource.mediaStreams)
+        }
 
-        if (sessionMediaSource.supportsDirectStream) {
+        // Jellyfin would only proxy a remote playlist, not its segments
+        val isRemotePlaylist = mediaSource.isRemote && mediaSource.path?.contains(".m3u", ignoreCase = true) == true
+
+        if (sessionMediaSource.supportsDirectStream && !isRemotePlaylist) {
             val staticTitle = listOfNotNull(
                 sessionMediaSource.bitrate?.toLong()?.formatBytes()?.replace("B", "b")?.plus("ps"),
                 (sessionMediaSource.size ?: mediaSource.size)?.formatBytes(),
@@ -674,12 +682,15 @@ class Jellyfin(private val suffix: String) :
         }
 
         // Without a known bitrate, offer every quality
-        val referenceBitrate = sessionMediaSource.videoBitrate ?: sessionMediaSource.bitrate ?: Int.MAX_VALUE
+        val referenceBitrate = sessionMediaSource.videoBitrate?.takeIf { it > 0 }
+            ?: sessionMediaSource.bitrate?.takeIf { it > 0 }
+            ?: Int.MAX_VALUE
         val qualities = Constants.QUALITIES_LIST.takeWhile { it.videoBitrate <= referenceBitrate }
         qualities.forEach {
             videoList.add(
                 Video(
-                    videoUrl = "",
+                    // Replaced in resolveVideo, but Anikku only auto-selects videos that have a url
+                    videoUrl = staticUrl,
                     videoTitle = it.description,
                     bitrate = it.videoBitrate,
                     headers = videoHeaders,

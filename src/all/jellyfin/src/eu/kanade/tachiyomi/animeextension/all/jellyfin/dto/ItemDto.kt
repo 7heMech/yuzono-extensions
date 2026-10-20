@@ -305,11 +305,13 @@ class MediaDto(
         val videoRangeType: String? = null,
         val channels: Int? = null,
     ) {
-        // Same thresholds as Jellyfin's own display title
+        // Same thresholds as Jellyfin's own display title, but also for portrait videos
         val resolution: String?
             get() {
-                val w = width ?: return null
-                val h = height ?: return null
+                val width = width ?: return null
+                val height = height ?: return null
+                val w = maxOf(width, height)
+                val h = minOf(width, height)
                 return RESOLUTIONS.firstOrNull { (maxWidth, maxHeight) -> w <= maxWidth && h <= maxHeight }?.third
             }
 
