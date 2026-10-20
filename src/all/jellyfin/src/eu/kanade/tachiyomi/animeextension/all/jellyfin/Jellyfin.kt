@@ -174,24 +174,37 @@ class Jellyfin(private val suffix: String) :
 
             val searchQuery = query.trim()
             var items = client.get(getSearchUrl(searchQuery)).parseAs<ItemListDto>(json)
-            val seriesQuery = searchQuery.replace(SEASON_TITLE_SUFFIX_REGEX, "").ifBlank { searchQuery }
-            val requestedSeasonTitle = if (
-                seriesQuery != searchQuery &&
+            val seasonSuffix = SEASON_TITLE_SUFFIX_REGEX.find(searchQuery)
+            val seriesQuery = seasonSuffix?.let { searchQuery.removeRange(it.range) }.orEmpty()
+
+            // Season names don't include the series name, so look the season up in the series instead
+            val seasons = if (
+                seriesQuery.isNotBlank() &&
                 items.items.none { it.name.equals(searchQuery, ignoreCase = true) }
             ) {
                 items = client.get(getSearchUrl(seriesQuery)).parseAs<ItemListDto>(json)
-                searchQuery
+                // Specials are season 0
+                val seasonNumber = seasonSuffix!!.groupValues[1].toIntOrNull() ?: 0
+                items.items
+                    .filter { it.type == ItemType.Series && it.name.equals(seriesQuery, ignoreCase = true) }
+                    .flatMap { series ->
+                        val seasonsUrl = baseUrl.toHttpUrl().newBuilder().apply {
+                            addPathSegment("Shows")
+                            addPathSegment(series.id)
+                            addPathSegment("Seasons")
+                        }.build()
+                        client.get(seasonsUrl).parseAs<ItemListDto>(json).items
+                    }
+                    .filter { it.indexNumber == seasonNumber }
             } else {
-                null
+                emptyList()
             }
-            val animeList = items.items.map { it.toSAnime(baseUrl, preferences.userId, preferences.concatNames) }
 
-            val matchingAnime = requestedSeasonTitle?.let { title ->
-                animeList.filter { it.title.equals(title, ignoreCase = true) }
-            } ?: animeList
+            val animeList = seasons.map { it.toSAnime(baseUrl, preferences.userId, concatenateNames = true) } +
+                items.items.map { it.toSAnime(baseUrl, preferences.userId, preferences.concatNames) }
             val hasNextPage = SERIES_FETCH_LIMIT * page < items.totalRecordCount
 
-            return AnimesPage(matchingAnime, hasNextPage)
+            return AnimesPage(animeList, hasNextPage)
         }
 
         val url = baseUrl.toHttpUrl().newBuilder().apply {
@@ -866,7 +879,7 @@ class Jellyfin(private val suffix: String) :
     companion object {
         private const val SERIES_FETCH_LIMIT = 20
         private val SEASON_TITLE_SUFFIX_REGEX = Regex(
-            """\s+(?:Season\s+\d+|Specials)\s*$""",
+            """\s+(?:Season\s+(\d+)|Specials)\s*$""",
             RegexOption.IGNORE_CASE,
         )
         private val LIBRARY_BLACKLIST = listOf(
