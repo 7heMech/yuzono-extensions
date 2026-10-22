@@ -677,5 +677,4 @@ class MKissa :
 
     private val SharedPreferences.prefServer
         get() = getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
-
 }
