@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.animeextension.en.mkissa
 
 import android.content.SharedPreferences
 import androidx.preference.ListPreference
-import androidx.preference.MultiSelectListPreference
 import androidx.preference.PreferenceScreen
 import aniyomi.lib.doodextractor.DoodExtractor
 import aniyomi.lib.filemoonextractor.FilemoonExtractor
@@ -59,15 +58,6 @@ class MKissa :
         }
         if (getString(PREF_DOMAIN_KEY, null) == LEGACY_API_DOMAIN) {
             edit().putString(PREF_DOMAIN_KEY, PREF_DOMAIN_DEFAULT).apply()
-        }
-        // The settings screen persists the alt-hoster default on first open, so hosters added
-        // later stay disabled for anyone who has opened it. Enable them once.
-        if (!getBoolean(PREF_ALT_HOSTER_MIGRATED_KEY, false)) {
-            val editor = edit().putBoolean(PREF_ALT_HOSTER_MIGRATED_KEY, true)
-            getStringSet(PREF_ALT_HOSTER_KEY, null)?.let {
-                editor.putStringSet(PREF_ALT_HOSTER_KEY, it + ADDED_ALT_HOSTERS)
-            }
-            editor.apply()
         }
     }
 
@@ -261,9 +251,6 @@ class MKissa :
     }
 
     override suspend fun getHosterList(episode: SEpisode): List<Hoster> {
-        val hosterSelection = preferences.getHosters
-        val altHosterSelection = preferences.getAltHosters
-
         val servers = streamResolver.sourceUrls(episode.url.parseAs<EpisodeVariables>().variables).mapNotNull { source ->
             val videoUrl = source.sourceUrl.decryptSource()
             val sourceName = source.sourceName.lowercase()
@@ -273,20 +260,16 @@ class MKissa :
                 .maxByOrNull { (name, _) -> name.length }
                 ?.first
 
-            // Check the named host before falling back to a generic player or URL extractor.
-            if (hosterName != null && hosterName !in hosterSelection) return@mapNotNull null
-
             val data = when {
                 hosterName != null && videoUrl.startsWith("/apivtwo/") ->
                     HosterData(videoUrl, EXTRACTOR_INTERNAL, hosterName, source.priority)
 
-                "player" in altHosterSelection && source.type == "player" ->
+                source.type == "player" ->
                     HosterData(videoUrl, EXTRACTOR_PLAYER, "player", source.priority)
 
                 else -> {
-                    val mapping = HOSTER_MAPPINGS.firstOrNull { (altHoster, urlMatches) ->
-                        (altHoster.lowercase() in hosterSelection || altHoster in altHosterSelection) &&
-                            videoUrl.containsAny(urlMatches)
+                    val mapping = HOSTER_MAPPINGS.firstOrNull { (_, urlMatches) ->
+                        videoUrl.containsAny(urlMatches)
                     } ?: return@mapNotNull null
                     HosterData(videoUrl, mapping.first, mapping.first.lowercase(), source.priority)
                 }
@@ -490,12 +473,10 @@ class MKissa :
         private const val EXTRACTOR_INTERNAL = "internal"
         private const val EXTRACTOR_PLAYER = "player"
 
-        private val INTERAL_HOSTER_NAMES = arrayOf(
-            "Default", "Ac", "Ak", "Kir", "Rab", "Luf-mp4",
-            "Si-Hls", "S-mp4", "Ac-Hls", "Uv-mp4", "Pn-Hls",
+        private val HOSTER_NAMES = arrayOf(
+            "Default", "Ac", "Ak", "Kir", "Rab", "Luf-hls", "Luf-mp4",
+            "Si-Hls", "S-mp4", "Ac-Hls", "Uv-mp4", "Pn-Hls", "Fm-Hls", "Vid-mp4",
         )
-
-        private val HOSTER_NAMES = INTERAL_HOSTER_NAMES + "Fm-Hls"
         private val HOSTER_MATCHERS = HOSTER_NAMES.map {
             it.lowercase() to Regex("""\b${Regex.escape(it.lowercase())}\b""")
         }
@@ -510,18 +491,6 @@ class MKissa :
             "streamwish" to listOf("wish"),
             "uni" to listOf("uns.bio"),
             "vidnest" to listOf("vidnest"),
-        )
-
-        private val ALT_HOSTER_NAMES = arrayOf(
-            "player",
-            "vidstreaming",
-            "okru",
-            "mp4upload",
-            "streamlare",
-            "doodstream",
-            "streamwish",
-            "uni",
-            "vidnest",
         )
 
         private const val THUMBNAIL_PROXY = "https://wp.youtube-anime.com/%s?w=250"
@@ -539,26 +508,55 @@ class MKissa :
         private const val PLAYER_DOMAIN = "https://allanime.day"
 
         private const val PREF_SERVER_KEY = "preferred_server"
-        private val PREF_SERVER_ENTRIES = arrayOf("Site Default") +
-            INTERAL_HOSTER_NAMES.sliceArray(1 until INTERAL_HOSTER_NAMES.size) +
-            ALT_HOSTER_NAMES
-        private val PREF_SERVER_ENTRY_VALUES = arrayOf("site_default") +
-            INTERAL_HOSTER_NAMES.sliceArray(1 until INTERAL_HOSTER_NAMES.size).map {
-                it.lowercase()
-            }.toTypedArray() +
-            ALT_HOSTER_NAMES
         private const val PREF_SERVER_DEFAULT = "site_default"
 
-        private const val PREF_HOSTER_KEY = "hoster_selection"
+        private val PREF_SERVER_ENTRIES = arrayOf(
+            "Site Default",
+            "Ac",
+            "Ac-Hls",
+            "Si-Hls",
+            "S-mp4",
+            "Kir",
+            "Ak",
+            "Rab",
+            "Luf-hls",
+            "Luf-mp4",
+            "Pn-Hls",
+            "Uv-mp4",
+            "Vid-mp4",
+            "Fm-Hls",
+            "Player",
+            "StreamWish",
+            "Vidstreaming",
+            "Vidnest",
+            "Uni",
+            "Mp4upload",
+            "Okru",
+        )
 
-        private val PREF_HOSTER_ENTRY_VALUES = HOSTER_NAMES.map {
-            it.lowercase()
-        }.toTypedArray()
-        private val PREF_HOSTER_DEFAULT = setOf("default", "ac", "ak", "kir", "si-hls", "s-mp4", "ac-hls", "fm-hls")
-
-        private const val PREF_ALT_HOSTER_KEY = "alt_hoster_selection"
-        private const val PREF_ALT_HOSTER_MIGRATED_KEY = "alt_hoster_selection_uni_vidnest"
-        private val ADDED_ALT_HOSTERS = setOf("uni", "vidnest")
+        private val PREF_SERVER_ENTRY_VALUES = arrayOf(
+            PREF_SERVER_DEFAULT,
+            "ac",
+            "ac-hls",
+            "si-hls",
+            "s-mp4",
+            "kir",
+            "ak",
+            "rab",
+            "luf-hls",
+            "luf-mp4",
+            "pn-hls",
+            "uv-mp4",
+            "vid-mp4",
+            "fm-hls",
+            "player",
+            "streamwish",
+            "vidstreaming",
+            "vidnest",
+            "uni",
+            "mp4upload",
+            "okru",
+        )
 
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private val PREF_QUALITY_ENTRIES = arrayOf(
@@ -634,22 +632,6 @@ class MKissa :
             summary = "%s"
         }.also(screen::addPreference)
 
-        MultiSelectListPreference(screen.context).apply {
-            key = PREF_HOSTER_KEY
-            title = "Enable/Disable Hosts"
-            entries = HOSTER_NAMES
-            entryValues = PREF_HOSTER_ENTRY_VALUES
-            setDefaultValue(PREF_HOSTER_DEFAULT)
-        }.also(screen::addPreference)
-
-        MultiSelectListPreference(screen.context).apply {
-            key = PREF_ALT_HOSTER_KEY
-            title = "Enable/Disable Alternative Hosts"
-            entries = ALT_HOSTER_NAMES
-            entryValues = ALT_HOSTER_NAMES
-            setDefaultValue(ALT_HOSTER_NAMES.toSet())
-        }.also(screen::addPreference)
-
         ListPreference(screen.context).apply {
             key = PREF_QUALITY_KEY
             title = "Preferred quality"
@@ -696,9 +678,4 @@ class MKissa :
     private val SharedPreferences.prefServer
         get() = getString(PREF_SERVER_KEY, PREF_SERVER_DEFAULT)!!
 
-    private val SharedPreferences.getHosters
-        get() = getStringSet(PREF_HOSTER_KEY, PREF_HOSTER_DEFAULT)!!
-
-    private val SharedPreferences.getAltHosters
-        get() = getStringSet(PREF_ALT_HOSTER_KEY, ALT_HOSTER_NAMES.toSet())!!
 }
