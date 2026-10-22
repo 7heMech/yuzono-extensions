@@ -297,25 +297,24 @@ class MKissa :
         // Some episodes list the same server more than once. Drop exact repeats, and number the
         // remaining ones (separate uploads) so they can be told apart.
         val seen = mutableMapOf<String, Int>()
-        return servers.distinctBy { (_, data) -> data.url }.map { (name, data) ->
-            val count = seen.merge(name, 1, Int::plus)!!
-            Hoster(hosterName = if (count > 1) "$name ($count)" else name, internalData = data.toJsonString())
-        }
-    }
-
-    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
-
-    override fun List<Hoster>.sortHosters(): List<Hoster> {
         val prefServer = preferences.prefServer
-
-        return map { it to it.internalData.parseAs<HosterData>() }
+        return servers.distinctBy { (_, data) -> data.url }
             .sortedWith(
-                compareByDescending<Pair<Hoster, HosterData>> { (_, data) ->
+                compareByDescending<Pair<String, HosterData>> { (_, data) ->
                     prefServer != PREF_SERVER_DEFAULT && data.serverKey == prefServer
                 }.thenByDescending { (_, data) -> data.priority },
             )
-            .map { (hoster, _) -> hoster }
+            .mapIndexed { index, (name, data) ->
+                val count = seen.merge(name, 1, Int::plus)!!
+                // Marking the top hoster lets the player start on it without waiting for the rest to load.
+                Hoster(
+                    hosterName = if (count > 1) "$name ($count)" else name,
+                    internalData = data.copy(isPreferred = index == 0).toJsonString(),
+                )
+            }
     }
+
+    override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
 
     // =============================== Videos ===============================
 
@@ -353,7 +352,9 @@ class MKissa :
         return videos.sortedWith(
             compareByDescending<Video> { it.videoTitle.contains(quality) }
                 .thenByDescending { it.resolution ?: it.videoTitle.resolution() },
-        )
+        ).mapIndexed { index, video ->
+            video.copy(preferred = data.isPreferred && index == 0)
+        }
     }
 
     // ============================= Utilities ==============================
