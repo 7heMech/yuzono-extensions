@@ -28,6 +28,7 @@ import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.graphQLBody
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -298,20 +299,45 @@ class MKissa :
         // remaining ones (separate uploads) so they can be told apart.
         val seen = mutableMapOf<String, Int>()
         val prefServer = preferences.prefServer
-        return servers.distinctBy { (_, data) -> data.url }
+        val hosters = servers.distinctBy { (_, data) -> data.url }
             .sortedWith(
                 compareByDescending<Pair<String, HosterData>> { (_, data) ->
                     prefServer != PREF_SERVER_DEFAULT && data.serverKey == prefServer
                 }.thenByDescending { (_, data) -> data.priority },
             )
-            .mapIndexed { index, (name, data) ->
+            .map { (name, data) ->
                 val count = seen.merge(name, 1, Int::plus)!!
-                // Marking the top hoster lets the player start on it without waiting for the rest to load.
-                Hoster(
-                    hosterName = if (count > 1) "$name ($count)" else name,
-                    internalData = data.copy(isPreferred = index == 0).toJsonString(),
-                )
+                (if (count > 1) "$name ($count)" else name) to data
             }
+
+        // The player starts on the first preferred video to load, without waiting for the other
+        // hosters. Load the preferred server up front so it alone gets marked when it has the
+        // preferred quality, or doesn't label its qualities. Otherwise every hoster with the
+        // preferred quality is marked, and the first one to load is played.
+        val (topName, topData) = hosters.firstOrNull() ?: return emptyList()
+        val prefVideos = if (prefServer != PREF_SERVER_DEFAULT && topData.serverKey == prefServer) {
+            try {
+                videosFromHoster(topName, topData)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                null
+            }
+        } else {
+            null
+        }
+        val prefServerWins = prefVideos?.firstOrNull()?.let { it.hasPreferredQuality() || it.height() == 0 } == true
+
+        return hosters.mapIndexed { index, (name, data) ->
+            if (index == 0 && prefVideos != null) {
+                Hoster(
+                    hosterName = name,
+                    videoList = if (prefServerWins) prefVideos.markFirstPreferred() else prefVideos,
+                    internalData = data.toJsonString(),
+                )
+            } else {
+                Hoster(hosterName = name, internalData = data.copy(markQuality = !prefServerWins).toJsonString())
+            }
+        }
     }
 
     override fun hosterListParse(response: Response): List<Hoster> = throw UnsupportedOperationException()
@@ -331,10 +357,16 @@ class MKissa :
 
     override suspend fun getVideoList(hoster: Hoster): List<Video> {
         val data = hoster.internalData.parseAs<HosterData>()
+        val videos = videosFromHoster(hoster.hosterName, data)
+        return if (data.markQuality && videos.firstOrNull()?.hasPreferredQuality() == true) videos.markFirstPreferred() else videos
+    }
+
+    // Sorted with the preferred quality first, then by resolution.
+    private suspend fun videosFromHoster(hosterName: String, data: HosterData): List<Video> {
         val url = data.url
 
         val videos = when (data.extractor) {
-            EXTRACTOR_INTERNAL -> mkissaExtractor.videoFromUrl(url, hoster.hosterName, PLAYER_DOMAIN)
+            EXTRACTOR_INTERNAL -> mkissaExtractor.videoFromUrl(url, hosterName, PLAYER_DOMAIN)
             EXTRACTOR_PLAYER -> listOf(Video(videoUrl = url, videoTitle = "Original", headers = playerHeaders))
             "vidstreaming" -> gogoStreamExtractor.videosFromUrl(url.replace(LEADING_SLASHES_REGEX, "https://"))
             "doodstream" -> doodExtractor.videosFromUrl(url)
@@ -348,13 +380,18 @@ class MKissa :
             else -> emptyList()
         }
 
-        val quality = preferences.quality
         return videos.sortedWith(
-            compareByDescending<Video> { it.videoTitle.contains(quality) }
-                .thenByDescending { it.resolution ?: it.videoTitle.resolution() },
-        ).mapIndexed { index, video ->
-            video.copy(preferred = data.isPreferred && index == 0)
-        }
+            compareByDescending<Video> { it.hasPreferredQuality() }
+                .thenByDescending { it.height() },
+        )
+    }
+
+    private fun Video.hasPreferredQuality(): Boolean = videoTitle.contains(preferences.quality)
+
+    private fun Video.height(): Int = resolution ?: videoTitle.resolution()
+
+    private fun List<Video>.markFirstPreferred(): List<Video> = mapIndexed { index, video ->
+        if (index == 0) video.copy(preferred = true) else video
     }
 
     // ============================= Utilities ==============================

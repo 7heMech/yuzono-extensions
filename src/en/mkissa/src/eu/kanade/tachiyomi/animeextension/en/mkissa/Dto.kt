@@ -174,5 +174,5 @@ data class HosterData(
     val extractor: String,
     val serverKey: String,
     val priority: Float,
-    val isPreferred: Boolean = false,
+    val markQuality: Boolean = false,
 )
