@@ -386,7 +386,16 @@ class MKissa :
         )
     }
 
-    private fun Video.hasPreferredQuality(): Boolean = videoTitle.contains(preferences.quality)
+    private fun Video.hasPreferredQuality(): Boolean {
+        val target = preferences.quality
+        val targetHeight = target.toIntOrNull()
+        if (targetHeight != null) {
+            val h = height()
+            if (h > 0) return h == targetHeight
+        }
+        val qualityPattern = Regex("""\b${Regex.escape(target)}p?\b""", RegexOption.IGNORE_CASE)
+        return qualityPattern.containsMatchIn(videoTitle)
+    }
 
     private fun Video.height(): Int = resolution ?: videoTitle.resolution()
 
@@ -442,7 +451,7 @@ class MKissa :
         return String(chars)
     }
 
-    private fun String.resolution(): Int = RESOLUTION_REGEX.find(this)?.value?.toIntOrNull() ?: 0
+    private fun String.resolution(): Int = RESOLUTION_REGEX.find(this)?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
     private fun parseStatus(string: String?): Int = when (string) {
         "Releasing" -> SAnime.ONGOING
@@ -577,7 +586,7 @@ class MKissa :
         private const val MAX_RATE_LIMIT_WAIT_SECONDS = 10L
         private val RATE_LIMIT_REGEX = Regex("""Too many requests, please try again in (\d+) seconds""")
 
-        private val RESOLUTION_REGEX = Regex("""\d{3,4}""")
+        private val RESOLUTION_REGEX = Regex("""\b(?:\d+x)?(\d{2,4})p?\b""", RegexOption.IGNORE_CASE)
         private val LEADING_SLASHES_REGEX = Regex("^//")
         private val NON_ALPHANUMERIC_REGEX = Regex("""[^a-zA-Z0-9]""")
         private val REPEATED_DASH_REGEX = Regex("""-{2,}""")
