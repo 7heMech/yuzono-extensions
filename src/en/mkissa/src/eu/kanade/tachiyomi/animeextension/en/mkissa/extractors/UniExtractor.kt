@@ -102,13 +102,13 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
             if (!playlist.contains("#EXTINF:") || playlist.lineSequence().none { it.isNotBlank() && !it.startsWith('#') }) {
                 return@use emptyList()
             }
-            return@use listOf(Video(videoUrl = playlistUrl, videoTitle = "Uni - Original", headers = headers))
+            return@use listOf(Video(videoUrl = playlistUrl, videoTitle = "Original", headers = headers))
         }
         variants.map { variant ->
             val height = variant.attributes["RESOLUTION"]?.substringAfter('x')?.toIntOrNull()
             Video(
                 videoUrl = variant.url,
-                videoTitle = height?.let { "Uni - ${it}p" } ?: "Uni - Original",
+                videoTitle = height?.let { "${it}p" } ?: "Original",
                 resolution = height,
                 headers = headers,
                 subtitleTracks = variant.subtitleTracks,

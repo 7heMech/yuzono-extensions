@@ -301,10 +301,10 @@ class MKissa :
         var preferredIndex: Int? = null
         if (prefServer != PREF_SERVER_DEFAULT) {
             for ((index, hoster) in hosters.withIndex()) {
-                val (name, data) = hoster
+                val (_, data) = hoster
                 if (data.serverKey != prefServer) break
                 val videos = try {
-                    videosFromHoster(name, data)
+                    videosFromHoster(data)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     continue
@@ -345,30 +345,33 @@ class MKissa :
 
     override suspend fun getVideoList(hoster: Hoster): List<Video> {
         val data = hoster.internalData.parseAs<HosterData>()
-        val videos = videosFromHoster(hoster.hosterName, data)
+        val videos = videosFromHoster(data)
         return if (data.markQuality && videos.firstOrNull()?.hasPreferredQuality() == true) videos.markFirstPreferred() else videos
     }
 
     // Sorted with the preferred quality first, then by resolution.
-    private suspend fun videosFromHoster(hosterName: String, data: HosterData): List<Video> {
+    private suspend fun videosFromHoster(data: HosterData): List<Video> {
         val url = data.url
 
         val videos = when (data.extractor) {
-            EXTRACTOR_INTERNAL -> mkissaExtractor.videoFromUrl(url, hosterName, PLAYER_DOMAIN)
+            EXTRACTOR_INTERNAL -> mkissaExtractor.videoFromUrl(url, PLAYER_DOMAIN)
             EXTRACTOR_PLAYER -> listOf(Video(videoUrl = url, videoTitle = "Original", headers = playerHeaders))
             "vidstreaming" -> gogoStreamExtractor.videosFromUrl(url.replace(LEADING_SLASHES_REGEX, "https://"))
             "doodstream" -> doodExtractor.videosFromUrl(url)
             "okru" -> okruExtractor.videosFromUrl(url)
             "mp4upload" -> mp4uploadExtractor.videosFromUrl(url, headers)
             "streamlare" -> streamlareExtractor.videosFromUrl(url)
-            "Fm-Hls" -> filemoonExtractor.videosFromUrl(url, prefix = "Fm-Hls:")
-            "streamwish" -> streamwishExtractor.videosFromUrl(url, videoNameGen = { "StreamWish:$it" })
+            "Fm-Hls" -> filemoonExtractor.videosFromUrl(url, prefix = "")
+            "streamwish" -> streamwishExtractor.videosFromUrl(url, videoNameGen = { it })
             "uni" -> uniExtractor.videosFromUrl(url, preferences.siteUrl.toHttpUrl().host)
             "vidnest" -> vidnestExtractor.videosFromUrl(url, "${preferences.siteUrl}/")
             else -> emptyList()
         }
 
-        return videos.sortedWith(
+        // These shared extractors include their host name in the label and have no naming callback.
+        return videos.map { video ->
+            video.copy(videoTitle = video.videoTitle.replaceFirst(SHARED_HOSTER_PREFIX_REGEX, "").ifBlank { "Original" })
+        }.sortedWith(
             compareByDescending<Video> { it.hasPreferredQuality() }
                 .thenByDescending { it.height() },
         )
@@ -561,6 +564,7 @@ class MKissa :
         private val RATE_LIMIT_REGEX = Regex("""Too many requests, please try again in (\d+) seconds""")
 
         private val RESOLUTION_REGEX = Regex("""\b(?:\d+x)?(\d{2,4})p?\b""", RegexOption.IGNORE_CASE)
+        private val SHARED_HOSTER_PREFIX_REGEX = Regex("""^(?:Gogostream|Vidstreaming|Doodstream|Okru|Mp4Upload|Streamlare)(?:\s*[-:]\s*|\s+|$)""", RegexOption.IGNORE_CASE)
         private val LEADING_SLASHES_REGEX = Regex("^//")
         private val NON_ALPHANUMERIC_REGEX = Regex("""[^a-zA-Z0-9]""")
         private val REPEATED_DASH_REGEX = Regex("""-{2,}""")
