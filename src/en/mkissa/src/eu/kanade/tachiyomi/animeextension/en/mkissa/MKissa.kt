@@ -297,29 +297,34 @@ class MKissa :
         // hosters. Load the preferred server up front so it alone gets marked when it has the
         // preferred quality, or doesn't label its qualities. Otherwise every hoster with the
         // preferred quality is marked, and the first one to load is played.
-        val (topName, topData) = hosters.firstOrNull() ?: return emptyList()
-        val prefVideos = if (prefServer != PREF_SERVER_DEFAULT && topData.serverKey == prefServer) {
-            try {
-                videosFromHoster(topName, topData)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                null
+        val loadedVideos = mutableMapOf<Int, List<Video>>()
+        var preferredIndex: Int? = null
+        if (prefServer != PREF_SERVER_DEFAULT) {
+            for ((index, hoster) in hosters.withIndex()) {
+                val (name, data) = hoster
+                if (data.serverKey != prefServer) break
+                val videos = try {
+                    videosFromHoster(name, data)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    continue
+                }
+                if (videos.isEmpty()) continue
+                loadedVideos[index] = videos
+                if (videos.first().hasPreferredQuality() || videos.all { it.height() == 0 }) {
+                    preferredIndex = index
+                    break
+                }
             }
-        } else {
-            null
         }
-        val prefServerWins = prefVideos?.firstOrNull()?.let { it.hasPreferredQuality() || it.height() == 0 } == true
 
         return hosters.mapIndexed { index, (name, data) ->
-            if (index == 0 && prefVideos != null) {
-                Hoster(
-                    hosterName = name,
-                    videoList = if (prefServerWins) prefVideos.markFirstPreferred() else prefVideos,
-                    internalData = data.toJsonString(),
-                )
-            } else {
-                Hoster(hosterName = name, internalData = data.copy(markQuality = !prefServerWins).toJsonString())
-            }
+            val videos = loadedVideos[index]
+            Hoster(
+                hosterName = name,
+                videoList = if (index == preferredIndex) videos?.markFirstPreferred() else videos,
+                internalData = data.copy(markQuality = preferredIndex == null || index == preferredIndex).toJsonString(),
+            )
         }
     }
 
@@ -369,18 +374,9 @@ class MKissa :
         )
     }
 
-    private fun Video.hasPreferredQuality(): Boolean {
-        val target = preferences.quality
-        val targetHeight = target.toIntOrNull()
-        if (targetHeight != null) {
-            val h = height()
-            if (h > 0) return h == targetHeight
-        }
-        val qualityPattern = Regex("""\b${Regex.escape(target)}p?\b""", RegexOption.IGNORE_CASE)
-        return qualityPattern.containsMatchIn(videoTitle)
-    }
+    private fun Video.hasPreferredQuality(): Boolean = height() == preferences.quality.toIntOrNull()
 
-    private fun Video.height(): Int = resolution ?: videoTitle.resolution()
+    private fun Video.height(): Int = resolution?.takeIf { it > 0 } ?: videoTitle.resolution()
 
     private fun List<Video>.markFirstPreferred(): List<Video> = mapIndexed { index, video ->
         if (index == 0) video.copy(preferred = true) else video
@@ -534,29 +530,9 @@ class MKissa :
             "Okru",
         )
 
-        private val PREF_SERVER_ENTRY_VALUES = arrayOf(
-            PREF_SERVER_DEFAULT,
-            "ac",
-            "ac-hls",
-            "si-hls",
-            "s-mp4",
-            "kir",
-            "ak",
-            "rab",
-            "luf-hls",
-            "luf-mp4",
-            "pn-hls",
-            "uv-mp4",
-            "vid-mp4",
-            "fm-hls",
-            "player",
-            "streamwish",
-            "vidstreaming",
-            "vidnest",
-            "uni",
-            "mp4upload",
-            "okru",
-        )
+        private val PREF_SERVER_ENTRY_VALUES = PREF_SERVER_ENTRIES.mapIndexed { index, name ->
+            if (index == 0) PREF_SERVER_DEFAULT else name.lowercase()
+        }.toTypedArray()
 
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private val PREF_QUALITY_ENTRIES = arrayOf(

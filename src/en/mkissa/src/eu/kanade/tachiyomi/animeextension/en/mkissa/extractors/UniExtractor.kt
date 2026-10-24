@@ -1,19 +1,23 @@
 package eu.kanade.tachiyomi.animeextension.en.mkissa.extractors
 
-import aniyomi.lib.playlistutils.PlaylistUtils
+import aniyomi.lib.playlistutils.parseHlsMasterPlaylist
 import eu.kanade.tachiyomi.animesource.model.Video
 import keiyoushi.network.get
 import keiyoushi.utils.bodyString
 import keiyoushi.utils.decodeHex
 import keiyoushi.utils.parseAs
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import okhttp3.CacheControl
 import okhttp3.Headers
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import java.io.IOException
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -22,39 +26,37 @@ import javax.crypto.spec.SecretKeySpec
 // playlist per delivery network; `r` must be the host of the page embedding the player.
 class UniExtractor(private val client: OkHttpClient, private val headers: Headers) {
 
-    private val playlistUtils by lazy { PlaylistUtils(client, headers) }
-
     suspend fun videosFromUrl(url: String, embedderHost: String): List<Video> {
         val playerUrl = url.toHttpUrl()
-        val origin = "${playerUrl.scheme}://${playerUrl.host}"
+        val origin = playerUrl.resolve("/")!!
         val videoId = playerUrl.fragment?.substringBefore("&")?.takeIf(String::isNotEmpty) ?: return emptyList()
 
         val playerHeaders = headers.newBuilder()
-            .set("Referer", "$origin/")
+            .set("Referer", origin.toString())
             .build()
 
-        val apiUrl = "$origin/api/v1/video".toHttpUrl().newBuilder()
+        val apiUrl = origin.resolve("/api/v1/video")!!.newBuilder()
             .addQueryParameter("id", videoId)
             .addQueryParameter("w", "1920")
             .addQueryParameter("h", "1080")
             .addQueryParameter("r", embedderHost)
             .build()
 
-        val payload = client.get(apiUrl, playerHeaders).bodyString().trim()
+        val payload = client.get(apiUrl, playerHeaders, cacheControl = CacheControl.FORCE_NETWORK).bodyString().trim()
         val streams = decrypt(payload).parseAs<UniStreams>()
 
         val config = parseStreamingConfig(streams.streamingConfig)
-        val cloudflarePath = streams.cfNative?.takeIf(String::isNotBlank) ?: streams.cf
         val paths = mapOf(
             "Google" to streams.hlsVideoGoogle,
-            "Cloudflare" to cloudflarePath,
+            // `cf` requires the browser player's signing loader; only cfNative is directly playable.
+            "Cloudflare" to streams.cfNative,
             "In-House" to streams.source,
             "Tiktok" to streams.hlsVideoTiktok,
         )
 
         val configuredOrder = config.order.map(::normalizeNetwork).filter { it in paths }
         val fallbackOrder = listOf("Google", "Cloudflare", "In-House", "Tiktok")
-        val networkOrder = (configuredOrder + fallbackOrder).distinct()
+        val networkOrder = (configuredOrder + fallbackOrder).distinct().filterNot { it == "Tiktok" } + "Tiktok"
 
         for (network in networkOrder) {
             val path = paths[network]?.takeIf(String::isNotBlank) ?: continue
@@ -62,26 +64,23 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
                 ?: config.adjust.entries.firstOrNull { normalizeNetwork(it.key) == network }?.value
             if (adjustment?.disabled == true) continue
 
-            val videos = runCatching {
-                val resolvedUrl = resolve(origin, path).toHttpUrl()
+            val videos = try {
+                val resolvedUrl = origin.resolve(path) ?: continue
                 val playlistUrl = resolvedUrl.newBuilder().apply {
-                    (adjustment?.params as? JsonObject)?.forEach { (key, value) ->
-                        (value as? JsonPrimitive)?.contentOrNull?.let { setQueryParameter(key, it) }
+                    adjustment?.params?.forEach { (key, value) ->
+                        value.contentOrNull?.let { setQueryParameter(key, it) }
                     }
                     adjustment?.domain?.takeIf(String::isNotBlank)?.let { domain ->
                         encodedPath(resolvedUrl.encodedPath.replace("/hls/", "/hlsmod/$domain/"))
                     }
-                }.build().toString()
+                }.build()
 
-                val extracted = playlistUtils.extractFromHls(
-                    playlistUrl,
-                    referer = "$origin/",
-                    masterHeaders = playerHeaders,
-                    videoHeaders = playerHeaders,
-                    videoNameGen = { quality -> "Uni - $quality" },
-                )
+                val extracted = videosFromPlaylist(playlistUrl, playerHeaders)
                 if (network == "Tiktok") extracted.map(::forceMpegTs) else extracted
-            }.getOrDefault(emptyList())
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
 
             if (videos.isNotEmpty()) {
                 return videos
@@ -89,6 +88,33 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
         }
 
         return emptyList()
+    }
+
+    private suspend fun videosFromPlaylist(url: HttpUrl, headers: Headers): List<Video> = client.get(url, headers).use { response ->
+        val playlist = response.body.string().trimStart('\uFEFF', ' ', '\r', '\n', '\t')
+        if (playlist.lineSequence().firstOrNull()?.trimEnd() != "#EXTM3U") {
+            throw IOException("Uni returned an invalid HLS playlist")
+        }
+        val playlistUrl = response.request.url.toString()
+        val variants = parseHlsMasterPlaylist(playlistUrl, playlist)
+        if (variants == null) {
+            // An error or empty manifest must not prevent trying the next CDN.
+            if (!playlist.contains("#EXTINF:") || playlist.lineSequence().none { it.isNotBlank() && !it.startsWith('#') }) {
+                return@use emptyList()
+            }
+            return@use listOf(Video(videoUrl = playlistUrl, videoTitle = "Uni - Original", headers = headers))
+        }
+        variants.map { variant ->
+            val height = variant.attributes["RESOLUTION"]?.substringAfter('x')?.toIntOrNull()
+            Video(
+                videoUrl = variant.url,
+                videoTitle = height?.let { "Uni - ${it}p" } ?: "Uni - Original",
+                resolution = height,
+                headers = headers,
+                subtitleTracks = variant.subtitleTracks,
+                audioTracks = variant.audioTracks,
+            )
+        }
     }
 
     private fun normalizeNetwork(name: String): String = when (name.lowercase()) {
@@ -104,7 +130,7 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
         return runCatching {
             when (element) {
                 is JsonPrimitive -> element.contentOrNull?.parseAs<StreamingConfig>()
-                is JsonObject -> element.toString().parseAs<StreamingConfig>()
+                is JsonObject -> element.parseAs<StreamingConfig>()
                 else -> null
             }
         }.getOrNull() ?: StreamingConfig()
@@ -118,12 +144,6 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
             ("force_mpegts" to "1"),
     )
 
-    private fun resolve(origin: String, path: String): String = when {
-        path.startsWith("//") -> "https:$path"
-        path.startsWith("http") -> path
-        else -> origin + "/" + path.removePrefix("/")
-    }
-
     private fun decrypt(hex: String): String {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(KEY, "AES"), IvParameterSpec(IV))
@@ -134,7 +154,6 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
     class UniStreams(
         val hlsVideoTiktok: String? = null,
         val hlsVideoGoogle: String? = null,
-        val cf: String? = null,
         val cfNative: String? = null,
         val source: String? = null,
         val streamingConfig: JsonElement? = null,
@@ -150,7 +169,7 @@ class UniExtractor(private val client: OkHttpClient, private val headers: Header
     private class NetworkAdjustment(
         val disabled: Boolean = false,
         val domain: String? = null,
-        val params: JsonElement? = null,
+        val params: Map<String, JsonPrimitive>? = null,
     )
 
     companion object {
