@@ -36,7 +36,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 class AniWaves :
     AnimeHttpSource(),
@@ -63,7 +63,7 @@ class AniWaves :
 
     private val http1Client by lazy {
         client.newBuilder()
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30.seconds)
             .protocols(listOf(Protocol.HTTP_1_1))
             .build()
     }
